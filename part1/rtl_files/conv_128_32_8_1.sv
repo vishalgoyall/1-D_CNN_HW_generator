@@ -22,7 +22,6 @@ module conv_128_32_8_1 #(
 //logic and parameter declarations
 localparam X_MEM_ADDR_WIDTH = $clog2(N);  //bus width for x mem addr
 localparam F_MEM_ADDR_WIDTH = $clog2(M);  //bus width for f mem addr
-localparam logic [F_MEM_ADDR_WIDTH-1:0] load_faddr_val = 0;
 
 logic xmem_full;
 logic xmem_addr_wr_ctrl;
@@ -34,7 +33,6 @@ logic [X_MEM_ADDR_WIDTH-1:0] load_xaddr_val;
 logic signed [T-1:0] xmem_data;
 
 logic [F_MEM_ADDR_WIDTH-1 :0] fmem_addr;
-logic fmem_wr_en;
 logic fmem_reset;
 logic signed [T-1:0] fmem_data;
 
@@ -47,7 +45,6 @@ logic signed [T-1:0] accum_out;
 
 logic load_xaddr; 
 logic en_xaddr_incr; 
-logic load_faddr; 
 logic en_faddr_incr;
 logic reset_accum; 
 logic en_accum;
@@ -98,7 +95,7 @@ logic en_accum;
 	  if (fmem_reset == 1)
 		  fmem_addr <= 'b0;
 	  else begin
-		  if (ext_incr_addr) begin
+		  if (en_faddr_incr) begin
 			  fmem_addr <= fmem_addr + 1;
 			  if (fmem_addr == M)
 				  fmem_addr <= 'b0;
@@ -110,7 +107,7 @@ logic en_accum;
 // F_MEM instantiation
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-  conv_16_4_20_1_f_rom fmem_inst (
+  conv_128_32_8_1_f_rom fmem_inst (
           .clk        (clk),
           .z          (fmem_data),
           .addr       (fmem_addr)
@@ -136,7 +133,6 @@ logic en_accum;
 	  .conv_done       (conv_done),
 	  .load_xaddr      (load_xaddr),
 	  .en_xaddr_incr   (en_xaddr_incr),
-	  .load_faddr      (load_faddr),
 	  .en_faddr_incr   (en_faddr_incr),
 	  .load_xaddr_val  (load_xaddr_val),
 	  .reset_accum     (reset_accum),
@@ -153,45 +149,43 @@ logic en_accum;
 // multiply xmem data with f mem data
    assign x_mult_f = xmem_data*fmem_data;  
 
-   logic [T-1:0] max_positive_val = {1'b0,T-1{1'b1}};
-   logic [T-1:0] min_negative_val = {1'b1,T-1{1'b0}};
+   logic signed [T-1:0] min_negative_val = {1<<(T-1)};
+   logic signed [T-1:0] max_positive_val = ~min_negative_val;
 
    logic signed [T-1:0] x_mult_f_reg;
    logic en_mult_reg;
 
-   // Overflow condition: if greater than max positive value or lesser than min negative value
-   logic mult_overflow = (((x_mult_f[$left(x_mult_f)] == 1'b0) && (|x_mult_f[($left(x_mult_f)-1):T-1])) || // if positive number and no other bit left of T-1 is high
-	   		  ((x_mult_f[$left(x_mult_f)] == 1'b1) && (~&x_mult_f[($left(x_mult_f)-1):T-1]))); // if negative number and no other bit left of T-1 is low
-
    assign en_mult_reg = conv_start;
    // Checking if overflow; if not, assign a new value, else saturate
    always @ (posedge clk) begin
-	   if (reset == 1)
+	   if (reset == 1 || reset_accum == 1'b1)
 		   x_mult_f_reg <= 'b0;
-	   else if (en_mult_reg) // <TODO> make it more readable
-		   x_mult_f_reg <= mult_overflow ? (x_mult_f[$left(x_mult_f)] ? min_negative_val : max_positive_val) : x_mult_f;
+	   else if (en_mult_reg)
+		   x_mult_f_reg <= (x_mult_f > max_positive_val) ? max_positive_val : ((x_mult_f < min_negative_val) ? min_negative_val : x_mult_f);
    end
 
-   logic signed [T:0] adder_in
-   logic signed [T-1:0] adder_reg;
+   logic signed [T:0] adder_in;
+   logic signed [T+2:0] adder_reg;
    logic en_adder_reg;
 
    assign adder_in = adder_reg + x_mult_f_reg;
-   logic adder_overflow = (((adder_in[$left(adder_in)] == 1'b0) && (|adder_in[($left(adder_in)-1):T-1])) || // if positive number and no other bit left of T-1 is high
-	   		  ((adder_in[$left(adder_in)] == 1'b1) && (~&adder_in[($left(adder_in)-1):T-1]))); // if negative number and no other bit left of T-1 is low
-   
+
    // Using accumulator enable as adder register enable
    assign en_adder_reg = en_accum;
    // Checking if overflow; if not, assign a new value, else saturate
    always @ (posedge clk) begin
-	   if (reset == 1)
+	   if (reset == 1 || reset_accum == 1'b1)
 		   adder_reg <= 'b0;
 	   else if (en_adder_reg)
-		   adder_reg <= adder_overflow ? (adder_in[$left(adder_in)] ? min_negative_val : max_positive_val) : adder_in;
+		   //adder_reg <= (adder_in > max_positive_val) ? max_positive_val : ((adder_in < min_negative_val) ? min_negative_val : adder_in);
+		   adder_reg <= adder_in;
    end
 
+   // Implement saturator
+   logic [T-1:0] adder_sat;
+   assign adder_sat = (adder_reg > max_positive_val) ? max_positive_val : ((adder_reg < min_negative_val) ? min_negative_val : adder_reg);
    // Implement ReLU
-   assign accum_in = (adder_reg[$left(adder_reg)]) ? T'b0 : adder_reg;
+   assign accum_in = (adder_reg[$left(adder_reg)]) ? 'b0 : adder_sat;
 
    always_ff @(posedge clk) begin
    	if (reset == 1'b1 || reset_accum == 1'b1) begin
@@ -202,23 +196,50 @@ logic en_accum;
    	end
    end
 
-  assign m_data_out_y = accum_out;   //send output data from accumulator output
+  assign m_data_out_y = accum_in;   //send output data from accumulator output
 
 endmodule
 
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //FMEM ROM Implementation (place holder; generated RTL)
-  
-module conv_16_4_20_1_f_rom(clk, addr, z);
+ module conv_128_32_8_1_f_rom(clk, addr, z);
    input clk;
-   input [1:0] addr;
-   output logic signed [19:0] z;
+   input [4:0] addr;
+   output logic signed [7:0] z;
    always_ff @(posedge clk) begin
       case(addr)
-        0: z <= 20'd346;
-        1: z <= 20'd6546;
-        2: z <= 20'd235;
-        3: z <= -20'd213;
+        0: z <= -8'd1;
+        1: z <= -8'd5;
+        2: z <= -8'd6;
+        3: z <= -8'd3;
+        4: z <= -8'd6;
+        5: z <= 8'd8;
+        6: z <= -8'd8;
+        7: z <= 8'd1;
+        8: z <= -8'd10;
+        9: z <= 8'd15;
+        10: z <= -8'd11;
+        11: z <= 8'd7;
+        12: z <= -8'd11;
+        13: z <= 8'd8;
+        14: z <= -8'd9;
+        15: z <= -8'd3;
+        16: z <= 8'd4;
+        17: z <= -8'd15;
+        18: z <= -8'd9;
+        19: z <= 8'd9;
+        20: z <= -8'd9;
+        21: z <= 8'd14;
+        22: z <= -8'd11;
+        23: z <= -8'd1;
+        24: z <= 8'd2;
+        25: z <= -8'd8;
+        26: z <= 8'd5;
+        27: z <= 8'd11;
+        28: z <= -8'd5;
+        29: z <= -8'd5;
+        30: z <= 8'd5;
+        31: z <= 8'd11;
       endcase
    end
 endmodule
