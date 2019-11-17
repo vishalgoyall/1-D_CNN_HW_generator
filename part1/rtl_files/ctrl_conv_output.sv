@@ -32,13 +32,13 @@ logic m_pre_valid, m_pre_valid_int, conv_start_accum;
 //Generate Control Signals for Address counters in memories 
 always_comb begin
     if (conv_start == 1'b1) begin   //if conv has not started then no action required
-	if (hold_pipeline == 1'b0) begin //when data transaction is done at output and new computation is required
+	if (m_ready_y == 1'b1 && m_valid_y == 1'b1) begin //when data transaction is done at output and new computation is required
 		load_xaddr     = 1'b1;       //load xaddr counter for next conv calculation
 		load_xaddr_val = cnt_conv;   //load xaddr counter with the starting address of next set to be done
 		en_xaddr_incr  = 1'b0;       //pause counter from being incremented
 		en_faddr_incr  = 1'b0;       //pause counter from being incremented
 	end
-	else if (hold_pipeline == 1'b1 && fmem_addr == unsigned`(T-1)) begin
+	else if (m_pre_valid == 1'b1) begin
          	load_xaddr     = 1'b0;       
 		load_xaddr_val = cnt_conv;   //dont care
 		en_xaddr_incr  = 1'b0;       //pause counter from being incremented
@@ -62,7 +62,7 @@ end
 
 //Generate control signals for accumulator in MAC engine
 always_comb begin 
-	if ((hold_y == 1'b0) || (conv_start_accum == 1'b0)) begin  //clear accum before starting new convolution
+	if ((m_valid_y == 1'b1 && m_ready_y == 1'b1) || (conv_start_accum == 1'b0)) begin  //clear accum before starting new convolution
 		reset_accum = 1'b1;
 		en_accum    = 1'b0;
 	end
@@ -107,7 +107,7 @@ always_ff @(posedge clk) begin
 		else if (m_pre_valid == 1'b1 && m_pre_valid_int == 1'b0) //detect only for rise edge of pre-valid, require to be stable before loading xaddr
 			cnt_conv <= cnt_conv + 1;
 
-		if (cnt_conv == unsigned'(X_MEM_SIZE - F_MEM_SIZE + 1) && hold_pipeline == 0)  //end of convolution
+		if (cnt_conv == unsigned'(X_MEM_SIZE - F_MEM_SIZE + 1) && m_valid_y == 1'b1 && m_ready_y == 1'b1)  //end of convolution
 		       conv_done <= 1'b1;
 	        else
 		       conv_done <= 1'b0;  //just generate a pulse
