@@ -110,9 +110,9 @@ logic en_accum;
 // F_MEM instantiation
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
-  memory #(.WIDTH(T), .SIZE(M),  .LOGSIZE(F_MEM_ADDR_WIDTH)) fmem_inst (
+  conv_16_4_20_1_f_rom fmem_inst (
           .clk        (clk),
-          .data_out   (fmem_data),
+          .z          (fmem_data),
           .addr       (fmem_addr)
    );
 
@@ -204,5 +204,22 @@ logic en_accum;
 
   assign m_data_out_y = accum_out;   //send output data from accumulator output
 
+endmodule
+
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+//FMEM ROM Implementation (place holder; generated RTL)
+  
+module conv_16_4_20_1_f_rom(clk, addr, z);
+   input clk;
+   input [1:0] addr;
+   output logic signed [19:0] z;
+   always_ff @(posedge clk) begin
+      case(addr)
+        0: z <= 20'd346;
+        1: z <= 20'd6546;
+        2: z <= 20'd235;
+        3: z <= -20'd213;
+      endcase
+   end
 endmodule
 
