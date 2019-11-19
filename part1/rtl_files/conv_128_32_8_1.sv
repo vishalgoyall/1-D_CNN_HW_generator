@@ -44,6 +44,7 @@ logic signed [T-1:0] accum_in;
 logic signed [T-1:0] accum_out;
 
 logic load_xaddr; 
+logic load_faddr; 
 logic en_xaddr_incr; 
 logic en_faddr_incr;
 logic reset_accum; 
@@ -95,7 +96,9 @@ logic en_accum;
 	  if (fmem_reset == 1)
 		  fmem_addr <= 'b0;
 	  else begin
-		  if (en_faddr_incr) begin
+		  if (load_faddr)
+			  fmem_addr <= 'b0;
+		  else if (en_faddr_incr) begin
 			  fmem_addr <= fmem_addr + 1;
 			  if (fmem_addr == M)
 				  fmem_addr <= 'b0;
@@ -132,6 +135,7 @@ logic en_accum;
 	  .conv_start      (conv_start),
 	  .conv_done       (conv_done),
 	  .load_xaddr      (load_xaddr),
+	  .load_faddr      (load_faddr),
 	  .en_xaddr_incr   (en_xaddr_incr),
 	  .en_faddr_incr   (en_faddr_incr),
 	  .load_xaddr_val  (load_xaddr_val),
@@ -165,7 +169,7 @@ logic en_accum;
    end
 
    logic signed [T:0] adder_in;
-   logic signed [T+2:0] adder_reg;
+   logic signed [T-1:0] adder_reg;
    logic en_adder_reg;
 
    assign adder_in = adder_reg + x_mult_f_reg;
@@ -177,15 +181,17 @@ logic en_accum;
 	   if (reset == 1 || reset_accum == 1'b1)
 		   adder_reg <= 'b0;
 	   else if (en_adder_reg)
-		   //adder_reg <= (adder_in > max_positive_val) ? max_positive_val : ((adder_in < min_negative_val) ? min_negative_val : adder_in);
-		   adder_reg <= adder_in;
+		   adder_reg <= (adder_in > max_positive_val) ? max_positive_val : ((adder_in < min_negative_val) ? min_negative_val : adder_in);
+		   //adder_reg <= adder_in;
    end
 
    // Implement saturator
-   logic [T-1:0] adder_sat;
-   assign adder_sat = (adder_reg > max_positive_val) ? max_positive_val : ((adder_reg < min_negative_val) ? min_negative_val : adder_reg);
+   //logic [T-1:0] adder_sat;
+   //assign adder_sat = (adder_reg > max_positive_val) ? max_positive_val : ((adder_reg < min_negative_val) ? min_negative_val : adder_reg);
+   
    // Implement ReLU
-   assign accum_in = (adder_reg[$left(adder_reg)]) ? 'b0 : adder_sat;
+   //assign accum_in = (adder_reg[$left(adder_reg)]) ? 'b0 : adder_sat;
+   assign accum_in = (adder_reg[$left(adder_reg)]) ? 'b0 : adder_reg;
 
    always_ff @(posedge clk) begin
    	if (reset == 1'b1 || reset_accum == 1'b1) begin
