@@ -49,6 +49,10 @@ logic en_faddr_incr;
 logic reset_accum; 
 logic en_accum;
 
+// signals for internal master slave at the output
+logic m_valid_y_int;
+logic m_ready_y_int;
+logic [T-1:0] m_data_out_y_int;
 
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 // Control Module to write data from Master into  X MEM using AXI
@@ -141,8 +145,8 @@ logic en_accum;
 	  .reset_accum     (reset_accum),
 	  .en_accum        (en_accum),
 	  .fmem_addr       (fmem_addr),
-	  .m_ready_y       (m_ready_y),
-	  .m_valid_y       (m_valid_y)
+	  .m_ready_y       (m_ready_y_int),
+	  .m_valid_y       (m_valid_y_int)
   );
 
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -169,7 +173,25 @@ logic en_accum;
    	end
    end
 
-  assign m_data_out_y = accum_in;   //send output data from accumulator output
+  assign m_data_out_y_int = accum_in;   //send output data from accumulator output
+
+  always_ff @ (posedge clk) begin
+	  if (reset == 1) begin
+		  m_valid_y <= 'b0;
+		  m_data_out_y <= 'b0;
+		  m_ready_y_int <= 'b1;
+	  end else begin
+		  if (m_valid_y == 1'b1 && m_ready_y == 1'b1) begin
+			  m_valid_y <= 'b0;
+			  m_ready_y_int <= 'b1;
+		  end
+		  if (m_valid_y_int == 'b1) begin
+			  m_ready_y_int <= 'b0;
+			  m_valid_y <= 'b1;
+			  m_data_out_y <= m_data_out_y_int;
+		  end
+	  end
+  end
 
 endmodule
 
