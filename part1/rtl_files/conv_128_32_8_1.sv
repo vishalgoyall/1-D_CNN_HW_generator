@@ -39,7 +39,6 @@ logic signed [T-1:0] fmem_data;
 logic conv_start, conv_pre_start;
 logic conv_done;
 
-logic signed [T+T-1:0] x_mult_f;
 logic signed [T-1:0] accum_in;
 logic signed [T-1:0] accum_out;
 
@@ -150,48 +149,16 @@ logic en_accum;
 // MAC unit of design
 // It uses signals coming from control convolution module to accumulate and reset
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-// multiply xmem data with f mem data
-   assign x_mult_f = xmem_data*fmem_data;  
-
-   logic signed [T-1:0] min_negative_val = {1<<(T-1)};
-   logic signed [T-1:0] max_positive_val = ~min_negative_val;
-
-   logic signed [T-1:0] x_mult_f_reg;
-   logic en_mult_reg;
-
-   assign en_mult_reg = conv_start;
-   // Checking if overflow; if not, assign a new value, else saturate
-   always @ (posedge clk) begin
-	   if (reset == 1 || reset_accum == 1'b1)
-		   x_mult_f_reg <= 'b0;
-	   else if (en_mult_reg)
-		   x_mult_f_reg <= (x_mult_f > max_positive_val) ? max_positive_val : ((x_mult_f < min_negative_val) ? min_negative_val : x_mult_f);
-   end
-
-   logic signed [T:0] adder_in;
-   logic signed [T-1:0] adder_reg;
-   logic en_adder_reg;
-
-   assign adder_in = adder_reg + x_mult_f_reg;
-
-   // Using accumulator enable as adder register enable
-   assign en_adder_reg = en_accum;
-   // Checking if overflow; if not, assign a new value, else saturate
-   always @ (posedge clk) begin
-	   if (reset == 1 || reset_accum == 1'b1)
-		   adder_reg <= 'b0;
-	   else if (en_adder_reg)
-		   adder_reg <= (adder_in > max_positive_val) ? max_positive_val : ((adder_in < min_negative_val) ? min_negative_val : adder_in);
-		   //adder_reg <= adder_in;
-   end
-
-   // Implement saturator
-   //logic [T-1:0] adder_sat;
-   //assign adder_sat = (adder_reg > max_positive_val) ? max_positive_val : ((adder_reg < min_negative_val) ? min_negative_val : adder_reg);
-   
-   // Implement ReLU
-   //assign accum_in = (adder_reg[$left(adder_reg)]) ? 'b0 : adder_sat;
-   assign accum_in = (adder_reg[$left(adder_reg)]) ? 'b0 : adder_reg;
+   mac_unit #(.T(T)) mac_unit_inst_0 (
+   	.clk		(clk),
+	.reset		(reset),
+	.reset_accum	(reset_accum),
+	.xmem_data	(xmem_data),
+	.fmem_data	(fmem_data),
+	.en_mult_reg	(conv_start),
+	.en_adder_reg	(en_accum),
+	.accum_in	(accum_in)
+   );
 
    always_ff @(posedge clk) begin
    	if (reset == 1'b1 || reset_accum == 1'b1) begin
@@ -205,6 +172,62 @@ logic en_accum;
   assign m_data_out_y = accum_in;   //send output data from accumulator output
 
 endmodule
+
+
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// MAC Unit (Contains one multiplier and accumulator)
+//
+module mac_unit #(
+	parameter T = 8
+) (
+	input			clk,
+	input			reset,
+	input			reset_accum,
+	input signed [T-1:0]	xmem_data,
+	input signed [T-1:0]	fmem_data,
+
+	input			en_mult_reg,
+	input			en_adder_reg,
+
+	output signed [T-1:0] 	accum_in
+
+);
+
+// multiply xmem data with f mem data
+   logic signed [T+T-1:0] x_mult_f;
+   logic signed [T-1:0] min_negative_val = {1<<(T-1)};
+   logic signed [T-1:0] max_positive_val = ~min_negative_val;
+   logic signed [T-1:0] x_mult_f_reg;
+
+   assign x_mult_f = xmem_data*fmem_data;  
+
+   // Checking if overflow; if not, assign a new value, else saturate
+   always @ (posedge clk) begin
+	   if (reset == 1 || reset_accum == 1'b1)
+		   x_mult_f_reg <= 'b0;
+	   else if (en_mult_reg)
+		   x_mult_f_reg <= (x_mult_f > max_positive_val) ? max_positive_val : ((x_mult_f < min_negative_val) ? min_negative_val : x_mult_f);
+   end
+
+   logic signed [T:0] adder_in;
+   logic signed [T-1:0] adder_reg;
+
+   assign adder_in = adder_reg + x_mult_f_reg;
+
+   // Using accumulator enable as adder register enable
+   // Checking if overflow; if not, assign a new value, else saturate
+   always @ (posedge clk) begin
+	   if (reset == 1 || reset_accum == 1'b1)
+		   adder_reg <= 'b0;
+	   else if (en_adder_reg)
+		   adder_reg <= (adder_in > max_positive_val) ? max_positive_val : ((adder_in < min_negative_val) ? min_negative_val : adder_in);
+		   //adder_reg <= adder_in;
+   end
+
+   assign accum_in = (adder_reg[$left(adder_reg)]) ? 'b0 : adder_reg;
+
+endmodule
+
 
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 //FMEM ROM Implementation (place holder; generated RTL)
