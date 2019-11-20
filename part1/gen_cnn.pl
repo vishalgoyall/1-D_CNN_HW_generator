@@ -28,6 +28,9 @@ use POSIX qw(ceil);
 # generate ROM file 
 genROM($M, $fileROM, $fhMain, $T);
 
+# generate RAM file
+genXRAM($T, $N, $fhMain);
+
 #TODO put all stuff here
 
 close $fhMain;
@@ -45,7 +48,7 @@ sub genROM
  my $romSize = $_[0];  # ROM size should be 1st Argument
  my $fileROM = $_[1];  # ROM file should be 2nd Argument
  my $fhMain  = $_[2];  # Top level design file handle should be 3rd Argument
- my $wordSize = $_[3];
+ my $wordSize = $_[3]; # Word Size as 4th Argument 
  
  my $designFile = "rtl_files/fmem_ROM.sv";  # output RTL file paths
  my $addrROM = ceil(log($romSize)/log(2));
@@ -97,3 +100,47 @@ sub genROM
 	.z    (fmem_data)
  );\n";
 }
+
+#---------------------------------------------------
+# Subroutine to generate XMEM RAM
+#---------------------------------------------------
+sub genXRAM {
+ my $wordSize = $_[0]-1;
+ my $ramSize  = $_[1]-1;
+ my $fhMain   = $_[2];  
+ 
+ my $designFile = "rtl_files/memory.sv";  
+ open(my $fho, '>', $designFile) or die "$designFile could not be created";  
+ 
+ my $ramAddr = ceil(log($ramSize)/log(2));
+ 
+ #print module
+ print $fho "//Module to work as RAM\n
+ module memory(clk, data_in, data_out, addr, wr_en);
+  input [$wordSize:0]		data_in;
+  input [$ramAddr:0]		addr;
+  input			clk, wr_en;
+  output logic [$wordSize:0]	data_out;
+  
+  logic [$ramSize:0][$wordSize:0] mem;
+  
+  always_ff @(posedge clk) begin
+   data_out <= mem[addr];
+   if (wr_en)
+      mem[addr] <= data_in;
+   end
+ endmodule";
+ 
+ #print instantiation
+ print $fhMain "// Instantiate XMEM instance
+ memory xmem_inst (
+   .clk        (clk),
+   .data_in    (s_data_in_x),
+   .data_out   (xmem_data),
+   .addr       (xmem_addr),
+   .wr_en      (xmem_wr_en)
+ );";
+
+
+}
+
