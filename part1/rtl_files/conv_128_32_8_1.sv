@@ -175,20 +175,51 @@ logic [T-1:0] m_data_out_y_int;
 
   assign m_data_out_y_int = accum_in;   //send output data from accumulator output
 
+  y_buffer #(.T(T)) y_buffer_inst_0 (
+	  .clk		(clk),
+	  .reset	(reset),
+	  .s_data_in	(m_data_out_y_int),
+	  .s_valid_in	(m_valid_y_int),
+	  .s_ready_out	(m_ready_y_int),
+	  .m_ready_in	(m_ready_y),
+	  .m_data_out	(m_data_out_y),
+	  .m_valid_out	(m_valid_y)
+  );
+
+endmodule
+
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// Master Slave pair: to buffer y[n] components in case of parallel MAC operations
+//
+module y_buffer #(
+	parameter T = 8
+) (
+	input			clk,
+	input			reset,
+	input [T-1:0]		s_data_in,
+	input			s_valid_in,
+	output logic		s_ready_out,
+
+	input			m_ready_in,
+	output logic [T-1:0]	m_data_out,
+	output logic		m_valid_out
+
+);
+
   always_ff @ (posedge clk) begin
 	  if (reset == 1) begin
-		  m_valid_y <= 'b0;
-		  m_data_out_y <= 'b0;
-		  m_ready_y_int <= 'b1;
+		  m_valid_out <= 'b0;
+		  m_data_out <= 'b0;
+		  s_ready_out <= 'b1;
 	  end else begin
-		  if (m_valid_y == 1'b1 && m_ready_y == 1'b1) begin
-			  m_valid_y <= 'b0;
-			  m_ready_y_int <= 'b1;
+		  if (m_valid_out == 1'b1 && m_ready_in == 1'b1) begin
+			  m_valid_out <= 'b0;
+			  s_ready_out <= 'b1;
 		  end
-		  if (m_valid_y_int == 'b1) begin
-			  m_ready_y_int <= 'b0;
-			  m_valid_y <= 'b1;
-			  m_data_out_y <= m_data_out_y_int;
+		  if (s_valid_in == 'b1) begin
+			  s_ready_out <= 'b0;
+			  m_valid_out <= 'b1;
+			  m_data_out <= s_data_in;
 		  end
 	  end
   end
