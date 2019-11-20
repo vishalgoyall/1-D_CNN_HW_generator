@@ -26,7 +26,7 @@ use POSIX qw(ceil);
  open(my $fhMain, '>', $fileTop) or die "$fileTop could not be created";  
 
 # generate ROM file 
-genROM($M, $fileROM, $fhMain);
+genROM($M, $fileROM, $fhMain, $T);
 
 #TODO put all stuff here
 
@@ -45,6 +45,7 @@ sub genROM
  my $romSize = $_[0];  # ROM size should be 1st Argument
  my $fileROM = $_[1];  # ROM file should be 2nd Argument
  my $fhMain  = $_[2];  # Top level design file handle should be 3rd Argument
+ my $wordSize = $_[3];
  
  my $designFile = "rtl_files/fmem_ROM.sv";  # output RTL file paths
  my $addrROM = ceil(log($romSize)/log(2));
@@ -68,7 +69,11 @@ sub genROM
  # for loop to print all ROM words	
  while (my $row = <$fhi>) {
  	chomp $row;
- 	print $fho "		$rowCnt	: z <= 'd$row;\n";
+	if ($row =~ m/'-'/) {
+ 	print $fho "		$rowCnt	: z <= -$wordSize\'d$row;\n";
+        } else { 
+ 	print $fho "		$rowCnt	: z <= $wordSize\'d$row;\n";
+        }
  	$rowCnt++;
  }
 
