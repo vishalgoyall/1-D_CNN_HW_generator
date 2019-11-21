@@ -1,6 +1,6 @@
 ##########################################################################################################
 # Perl file to generate design for Project 3 : 1D convolution neural network
-# Part TODO
+# Part 1
 # Authors: Prateek Jain and Vishal Goyal
 # -> Script has been divided into subroutines, each tasked to generate individual component of the design
 # -> Expected order of argument list is <N M T P constant.txt>
@@ -22,8 +22,8 @@ use POSIX qw(ceil);
  my $fileROM = $ARGV[4];
 
 # Open toplevel SV design file
- my $fileTop = "rtl_files_auto/conv_$N\_$M\_$T\_$P.sv";
- print "./rtl_files_auto\/conv_$N\_$M\_$T\_$P.sv\n";
+ my $fileTop = "rtl_files_$N\_$M\_$T\_$P/conv_$N\_$M\_$T\_$P.sv";
+ print "./rtl_files_$N\_$M\_$T\_$P\/conv_$N\_$M\_$T\_$P.sv\n";
 
  open(my $fhMain, '>', $fileTop) or die "$fileTop could not be created";  
 
@@ -130,9 +130,11 @@ print $fhMain "
 # generate output control module
 genCtrlout($N, $M, $xSize, $fSize, $fhMain);
 
-#TODO put all stuff here
+# generate MAC unit
+genMAC($T, $fhMain);
 
-print $fhMain "endmodule";
+print $fhMain "
+endmodule";
 close $fhMain;
 
 
@@ -150,8 +152,8 @@ sub genROM
  my $fhMain  = $_[2];  # Top level design file handle should be 3rd Argument
  my $wordSize = $_[3]; # Word Size as 4th Argument 
  
- my $designFile = "rtl_files_auto/fmem_ROM.sv";  # output RTL file paths
- print "./rtl_files_auto\/fmem_ROM.sv\n";
+ my $designFile = "rtl_files_$N\_$M\_$T\_$P/fmem_ROM.sv";  # output RTL file paths
+ print "./rtl_files_$N\_$M\_$T\_$P\/fmem_ROM.sv\n";
  my $addrROM = ceil(log($romSize)/log(2));
  my $rowCnt = 0;
  
@@ -210,8 +212,8 @@ sub genXRAM {
  my $ramSize  = $_[1]-1;
  my $fhMain   = $_[2];  
  
- my $designFile = "rtl_files_auto/memory.sv";  
- print "./rtl_files_auto\/memory.sv\n";  
+ my $designFile = "rtl_files_$N\_$M\_$T\_$P/memory.sv";  
+ print "./rtl_files_$N\_$M\_$T\_$P\/memory.sv\n";  
  open(my $fho, '>', $designFile) or die "$designFile could not be created";  
  
  my $ramAddr = ceil(log($ramSize)/log(2));
@@ -219,10 +221,10 @@ sub genXRAM {
  #print module
  print $fho "//Module to work as RAM\n
  module memory(clk, data_in, data_out, addr, wr_en);
-  input [$wordSize:0]		data_in;
-  input [$ramAddr:0]		addr;
-  input			clk, wr_en;
-  output logic [$wordSize:0]	data_out;
+  input [$wordSize:0] data_in;
+  input [$ramAddr:0] addr;
+  input	clk, wr_en;
+  output logic [$wordSize:0] data_out;
   
   logic [$ramSize:0][$wordSize:0] mem;
   
@@ -255,8 +257,8 @@ sub genCtrlXmem {
  my $wordSize = $_[1];
  my $fhMain   = $_[2]; 
 
- my $designFile = "rtl_files_auto/ctrl_mem_write.sv";  
- print "./rtl_files_auto\/ctrl_mem_write.sv\n";  
+ my $designFile = "rtl_files_$N\_$M\_$T\_$P/ctrl_mem_write.sv";  
+ print "./rtl_files_$N\_$M\_$T\_$P\/ctrl_mem_write.sv\n";  
  open(my $fho, '>', $designFile) or die "$designFile could not be created";  
 
  #print module
@@ -337,8 +339,8 @@ sub genCtrlout {
  my $fSize  = $_[3];
  my $fhMain = $_[4]; 
 
- my $designFile = "rtl_files_auto/ctrl_conv_output.sv";  
- print "./rtl_files_auto\/ctrl_conv_output.sv\n";  
+ my $designFile = "rtl_files_$N\_$M\_$T\_$P/ctrl_conv_output.sv";  
+ print "./rtl_files_$N\_$M\_$T\_$P\/ctrl_conv_output.sv\n";  
  open(my $fho, '>', $designFile) or die "$designFile could not be created";
 
  #print module
@@ -485,10 +487,93 @@ print $fhMain "\n
 	  .reset_accum     (reset_accum),
 	  .en_accum        (en_accum),
 	  .fmem_addr       (fmem_addr),
-	  .m_ready_y       (m_ready_y_int),
-	  .m_valid_y       (m_valid_y_int)
+	  .m_ready_y       (m_ready_y),
+	  .m_valid_y       (m_valid_y)
   );\n";
 
  close $fho;
 } 
 
+#-----------------------------------------------------
+# Subroutine to MAC unit
+#-----------------------------------------------------   
+sub genMAC
+{
+ my $DW_minus1 = $_[0]-1;
+ my $fhMain = $_[1];
+
+ my $designFile = "rtl_files_$N\_$M\_$T\_$P/mac.sv";  # output RTL file paths
+ open(my $fho, '>', $designFile) or die "$designFile could not be created";
+ print "./rtl_files_$N\_$M\_$T\_$P\/mac.sv\n";
+
+ my $multWidth = 2*$_[0] - 1;
+
+ #print module
+ print $fho "
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// MAC Unit (Contains one multiplier and accumulator)
+//
+ module mac 
+ (
+ 	input  clk,
+ 	input  reset,
+ 	input  reset_accum,
+ 	input  en_mult_reg,
+ 	input  en_adder_reg,
+ 	input  signed [$DW_minus1:0] fmem_data,
+ 	input  signed [$DW_minus1:0] xmem_data,
+ 	output signed [$DW_minus1:0] accum_in
+ 
+ );
+
+   logic signed [$multWidth:0] x_mult_f;
+   logic signed [$DW_minus1:0] x_mult_f_reg;
+
+   localparam logic [$DW_minus1:0] allOnes = {@{[$DW_minus1 + 1]}\{1'b1}\};
+   localparam logic [$DW_minus1:0] min_val = {1<<($DW_minus1)};
+   localparam logic [$DW_minus1:0] max_val = ~min_val;
+   localparam logic signed [$multWidth:0] min_negative_val = {allOnes,min_val};
+   localparam logic signed [$multWidth:0] max_positive_val = ~min_negative_val;
+
+   assign x_mult_f = xmem_data*fmem_data;  
+
+   // Checking if overflow; if not, assign a new value, else saturate
+   always @ (posedge clk) begin
+	   if (reset == 1 || reset_accum == 1'b1)
+		   x_mult_f_reg <= 'b0;
+	   else if (en_mult_reg)
+		   x_mult_f_reg <= (x_mult_f > max_positive_val) ? max_positive_val : ((x_mult_f < min_negative_val) ? min_negative_val : x_mult_f);
+   end
+
+   logic signed [$_[0]:0] adder_in;
+   logic signed [$DW_minus1:0] adder_reg;
+
+   assign adder_in = adder_reg + x_mult_f_reg;
+
+   // Using accumulator enable as adder register enable
+   // Checking if overflow; if not, assign a new value, else saturate
+   always @ (posedge clk) begin
+	   if (reset == 1 || reset_accum == 1'b1)
+		   adder_reg <= 'b0;
+	   else if (en_adder_reg)
+		   adder_reg <= (adder_in > max_val) ? max_val : ((adder_in < min_val) ? min_val : adder_in);
+   end
+
+   assign accum_in = (adder_reg[\$left(adder_reg)]) ? 'b0 : adder_reg;
+
+endmodule"; 
+
+ # print instantiation
+   print $fhMain "\n
+ // MAC unit of design
+ mac mac_unit_inst (
+      .clk          (clk),
+      .reset        (reset),
+      .reset_accum  (reset_accum),
+      .xmem_data    (xmem_data),
+      .fmem_data    (fmem_data),
+      .en_mult_reg  (conv_start),
+      .en_adder_reg (en_accum),
+      .accum_in     (m_data_out_y)
+ );\n";
+} 
