@@ -1,0 +1,5 @@
+1. Shell Script gen.sh requires input N M T P in the same order.
+2. The script will first generate required directories for both tb and rtl files
+3. The script then generates the tb files and constant ROM file.
+4. The script then auto generate RTL
+5. The script then compiles the RTL files along with topt level tb module
