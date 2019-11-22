@@ -1,0 +1,6 @@
+../rtl_files_16_4_16_1/conv_16_4_16_1.sv
+../rtl_files_16_4_16_1/ctrl_mem_write.sv
+../rtl_files_16_4_16_1/memory.sv
+../rtl_files_16_4_16_1/fmem_ROM.sv
+../rtl_files_16_4_16_1/ctrl_conv_output.sv
+../rtl_files_16_4_16_1/mac.sv
