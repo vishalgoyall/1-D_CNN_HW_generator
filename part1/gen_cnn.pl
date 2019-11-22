@@ -23,7 +23,7 @@ use POSIX qw(ceil);
 
 # Open toplevel SV design file
  my $fileTop = "rtl_files_$N\_$M\_$T\_$P/conv_$N\_$M\_$T\_$P.sv";
- print "./rtl_files_$N\_$M\_$T\_$P\/conv_$N\_$M\_$T\_$P.sv\n";
+ print "../rtl_files_$N\_$M\_$T\_$P\/conv_$N\_$M\_$T\_$P.sv\n";
 
  open(my $fhMain, '>', $fileTop) or die "$fileTop could not be created";  
 
@@ -41,12 +41,12 @@ print $fhMain "
 module conv_$N\_$M\_$T\_$P (
 	input clk, 
 	input reset, 
-	input s_valid_x, 
-	input m_ready_y,
 	input signed [$Tminus1:0] s_data_in_x, 
+	input s_valid_x, 
 	output logic s_ready_x,
+	output logic signed [$Tminus1:0] m_data_out_y,
 	output logic m_valid_y, 
-	output logic signed [$Tminus1:0] m_data_out_y
+	input m_ready_y
 );
 
 logic xmem_full;
@@ -153,7 +153,7 @@ sub genROM
  my $wordSize = $_[3]; # Word Size as 4th Argument 
  
  my $designFile = "rtl_files_$N\_$M\_$T\_$P/fmem_ROM.sv";  # output RTL file paths
- print "./rtl_files_$N\_$M\_$T\_$P\/fmem_ROM.sv\n";
+ print "../rtl_files_$N\_$M\_$T\_$P\/fmem_ROM.sv\n";
  my $addrROM = ceil(log($romSize)/log(2));
  my $rowCnt = 0;
  
@@ -175,7 +175,8 @@ sub genROM
  # for loop to print all ROM words	
  while (my $row = <$fhi>) {
  	chomp $row;
-	if ($row =~ m/'-'/) {
+	if ($row =~ m/-/) {
+	$row =~ s/^-//;
  	print $fho "		$rowCnt	: z <= -$wordSize\'d$row;\n";
         } else { 
  	print $fho "		$rowCnt	: z <= $wordSize\'d$row;\n";
@@ -213,10 +214,10 @@ sub genXRAM {
  my $fhMain   = $_[2];  
  
  my $designFile = "rtl_files_$N\_$M\_$T\_$P/memory.sv";  
- print "./rtl_files_$N\_$M\_$T\_$P\/memory.sv\n";  
+ print "../rtl_files_$N\_$M\_$T\_$P\/memory.sv\n";  
  open(my $fho, '>', $designFile) or die "$designFile could not be created";  
  
- my $ramAddr = ceil(log($ramSize)/log(2));
+ my $ramAddr = ceil(log($ramSize+1)/log(2))-1;
  
  #print module
  print $fho "//Module to work as RAM\n
@@ -258,7 +259,7 @@ sub genCtrlXmem {
  my $fhMain   = $_[2]; 
 
  my $designFile = "rtl_files_$N\_$M\_$T\_$P/ctrl_mem_write.sv";  
- print "./rtl_files_$N\_$M\_$T\_$P\/ctrl_mem_write.sv\n";  
+ print "../rtl_files_$N\_$M\_$T\_$P\/ctrl_mem_write.sv\n";  
  open(my $fho, '>', $designFile) or die "$designFile could not be created";  
 
  #print module
@@ -340,7 +341,7 @@ sub genCtrlout {
  my $fhMain = $_[4]; 
 
  my $designFile = "rtl_files_$N\_$M\_$T\_$P/ctrl_conv_output.sv";  
- print "./rtl_files_$N\_$M\_$T\_$P\/ctrl_conv_output.sv\n";  
+ print "../rtl_files_$N\_$M\_$T\_$P\/ctrl_conv_output.sv\n";  
  open(my $fho, '>', $designFile) or die "$designFile could not be created";
 
  #print module
@@ -504,7 +505,7 @@ sub genMAC
 
  my $designFile = "rtl_files_$N\_$M\_$T\_$P/mac.sv";  # output RTL file paths
  open(my $fho, '>', $designFile) or die "$designFile could not be created";
- print "./rtl_files_$N\_$M\_$T\_$P\/mac.sv\n";
+ print "../rtl_files_$N\_$M\_$T\_$P\/mac.sv\n";
 
  my $multWidth = 2*$_[0] - 1;
 
@@ -526,14 +527,11 @@ sub genMAC
  
  );
 
-   logic signed [$multWidth:0] x_mult_f;
+  // multiply xmem data with f mem data
+   logic signed [@{[2*$DW_minus1+1]}:0] x_mult_f;
+   localparam logic signed [$DW_minus1:0] min_negative_val = {1<<$DW_minus1};
+   localparam logic signed [$DW_minus1:0] max_positive_val = ~min_negative_val;
    logic signed [$DW_minus1:0] x_mult_f_reg;
-
-   localparam logic [$DW_minus1:0] allOnes = {@{[$DW_minus1 + 1]}\{1'b1}\};
-   localparam logic [$DW_minus1:0] min_val = {1<<($DW_minus1)};
-   localparam logic [$DW_minus1:0] max_val = ~min_val;
-   localparam logic signed [$multWidth:0] min_negative_val = {allOnes,min_val};
-   localparam logic signed [$multWidth:0] max_positive_val = ~min_negative_val;
 
    assign x_mult_f = xmem_data*fmem_data;  
 
@@ -556,10 +554,11 @@ sub genMAC
 	   if (reset == 1 || reset_accum == 1'b1)
 		   adder_reg <= 'b0;
 	   else if (en_adder_reg)
-		   adder_reg <= (adder_in > max_val) ? max_val : ((adder_in < min_val) ? min_val : adder_in);
+		   adder_reg <= (adder_in > max_positive_val) ? max_positive_val : ((adder_in < min_negative_val) ? min_negative_val : adder_in);
+		   //adder_reg <= adder_in;
    end
-
-   assign accum_in = (adder_reg[\$left(adder_reg)]) ? 'b0 : adder_reg;
+ 
+   assign accum_in = (adder_reg[\$left(adder_reg)]) ? signed'('b0) : adder_reg;
 
 endmodule"; 
 
@@ -576,4 +575,6 @@ endmodule";
       .en_adder_reg (en_accum),
       .accum_in     (m_data_out_y)
  );\n";
+
+ close $fho;
 } 
