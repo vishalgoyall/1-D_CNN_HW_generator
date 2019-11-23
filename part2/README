@@ -1,0 +1,21 @@
+++++++++++++++++++++++++++++++++++++++
+Shell Script
+++++++++++++++++++++++++++++++++++++++
+1. Shell Script gen.sh requires input N M T P in the same order.
+2. The script will first generate required directories for both tb and rtl files
+3. The script then generates the tb files and constant ROM file.
+4. The script then auto generate RTL
+5. The script then compiles the RTL files along with topt level tb module
+6. Currently commented out :: The script next simulates the rtl files with generated testbench
+7. Currently commented out :: Script creates folder for synthesis as well with required scripts.
+
+NOTE: Do not delete tb_ref/ and synth_ref/ directories
+
+Just following command needs to be run:
+> ./gen.sh N M T P
+
++++++++++++++++++++++++++++++++++++++++
+Perl Script
++++++++++++++++++++++++++++++++++++++++
+gen_cnn.pl is called from gen.sh shell script.
+This script generates RTL files based on N,M,P and T inputs
