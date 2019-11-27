@@ -74,10 +74,14 @@ genXRAM($T, $N, $fhMain, $P);
 # TODO generate xmem read ctrl and MAC ctrl logic
 genCtrlMAC($xSize,$fhMain,$P);
 
-# TODO generate output control module
+# generate output control module
+genCtrlConvOutput($T, $fhMain, $xSize, $fSize);
 
 # generate MAC unit
 genMAC($T, $fhMain);
+
+# generate y buffer unit
+genYBuf($T, $fhMain);
 
 print $fhMain "
 endmodule";
@@ -215,7 +219,7 @@ sub genCtrlMemWrite {
   logic xmem_reset;
   logic [$memSize:0] xmem_waddr;
   logic xmem_wr_en;
-  logic conv_done; //TODO correct location in code
+  logic conv_done;
 
   assign xmem_reset = reset || conv_done;
 
@@ -365,15 +369,15 @@ endmodule";
  //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  // MAC Instantitaion
  
- logic reset_mac;
  logic signed [$DW_minus1:0] mac_dout_vector [@{[$P-1]}:0];
  logic [@{[$P-1]}:0] en_mac_vector;
- logic reset_accum;  //TODO connect properly
-
- assign reset_mac = reset || reset_accum;
+ logic [@{[$P-1]}:0] reset_mac;
 
  genvar j;
  generate for(j = 0; j< $P; j++) begin : mac_block
+
+   assign reset_mac[j] = reset || reset_accum[j];
+
    mac mac_inst (
        .clk          (clk),
        .reset        (reset_mac),
@@ -387,6 +391,307 @@ endmodule";
  endgenerate\n";
 
  close $fho;
+}
+
+sub genCtrlConvOutput
+{
+ my $DW_minus1 = $_[0]-1;
+ my $fhMain = $_[1];
+ my $FMemSize_minus1 = $_[2];
+ my $XMemSize_minus1 = $_[3];
+
+ my $designFile = "rtl_files_$N\_$M\_$T\_$P/ctrl_conv_output.sv";
+ open(my $fho, '>', $designFile) or die "$designFile could not be created";
+ print "../rtl_files_$N\_$M\_$T\_$P\/ctrl_conv_output.sv\n";
+
+ print $fho "
+
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// Control Module to 
+// 1. generate signals required to fetch data from memories
+// 2. generate signals to control MAC operations
+// 3. generate valid signal for AXI interface
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+module ctrl_conv_output (
+        input clk,            
+        input reset,           
+        input conv_start,     
+        input m_ready_y,       
+        input [$FMemSize_minus1:0] fmem_addr,       
+        output logic conv_done,       
+        output logic load_xaddr,    
+        output logic en_xaddr_incr, 
+        output logic load_faddr,   
+        output logic en_faddr_incr, 
+        output logic reset_accum,  
+        output logic en_accum,        
+        output logic m_valid_y,       
+        output logic [$XMemSize_minus1: 0] load_xaddr_val
+);
+
+logic [$XMemSize_minus1:0] cnt_conv;
+logic m_pre_pre_valid_y, conv_start_accum, m_pre_valid_y;
+
+//Generate Control Signals for Address counters in memories 
+always_comb begin
+    if (conv_start == 1'b1) begin   //if conv has not started then no action required
+	if (m_ready_y == 1'b1 && m_valid_y == 1'b1) begin //when data transaction is done at output and new computation is required
+		load_xaddr     = 1'b1;       //load xaddr counter for next conv calculation
+		load_faddr     = 1'b1;       //load faddr counter for next conv calculation
+		load_xaddr_val = cnt_conv;   //load xaddr counter with the starting address of next set to be done
+		en_xaddr_incr  = 1'b0;       //pause counter from being incremented
+		en_faddr_incr  = 1'b0;       //pause counter from being incremented
+	end
+	else if (m_pre_pre_valid_y == 1'b1) begin
+         	load_xaddr     = 1'b0;       
+		load_faddr     = 1'b0;       
+		load_xaddr_val = cnt_conv;   //dont care
+		en_xaddr_incr  = 1'b0;       //pause counter from being incremented
+		en_faddr_incr  = 1'b0;       //pause counter from being incremented
+	end
+	else begin
+		load_xaddr     = 1'b0;       
+		load_faddr     = 1'b0;       
+		load_xaddr_val = cnt_conv;   //dont care
+		en_xaddr_incr  = 1'b1;       //pause counter from being incremented
+		en_faddr_incr  = 1'b1;       //pause counter from being incremented
+	end
+    end
+    else begin
+	load_xaddr     = 1'b0;       
+	load_faddr     = 1'b0;       
+	load_xaddr_val = 0;   
+	en_xaddr_incr  = 1'b0;  
+	en_faddr_incr  = 1'b0; 
+    end
+end
+
+
+//Generate control signals for accumulator in MAC engine
+always_comb begin 
+	if ((m_valid_y == 1'b1 && m_ready_y == 1'b1) || (conv_start_accum == 1'b0)) begin  //clear accum before starting new convolution
+		reset_accum = 1'b1;
+		en_accum    = 1'b0;
+	end
+	else if (m_valid_y == 1'b1 && conv_start_accum == 1'b1) begin  //hold accum till m_valid is set, m_valid deasserts with m_ready
+		reset_accum = 1'b0;
+		en_accum    = 1'b0;
+	end
+	else begin
+		reset_accum = 1'b0;
+		en_accum    = 1'b1;
+	end
+end
+
+//Valid, Pre Valid, Convolution Done and Convolution tracker implementation
+always_ff @(posedge clk) begin
+	if (reset == 1'b1) begin
+		m_pre_valid_y     <= 1'b0;  //dummy signal to delay valid by one cycle
+		m_valid_y         <= 1'b0;  //valid signal for AXI
+		cnt_conv          <= 0;     //convolution tracker
+		conv_start_accum  <= 1'b0;  //accum should start once cycle after first read from memory is done
+		m_pre_pre_valid_y <= 1'b0;  //required to hold mem address with valid signal assertion
+		conv_done         <= 1'b0;  //final dine signal
+	end
+	else begin
+		if (m_ready_y == 1'b1 && m_valid_y == 1'b1)  //reset when ready is recieved and valid was asserted
+		       m_pre_valid_y <= 1'b0;	
+		else if (m_pre_pre_valid_y == 1'b1 && conv_start == 1'b1)  //assert with final accumulation; used to generate valid one cycle after this 
+			m_pre_valid_y <= 1'b1;
+
+		if (m_ready_y == 1'b1 && m_valid_y == 1'b1)  //reset when ready is recieved and valid was asserted
+		       m_valid_y <= 1'b0;	
+	       else if (m_pre_valid_y == 1'b1 && conv_start == 1'b1) // assert when pre_valid is 1
+		       m_valid_y <= 1'b1;
+
+		if (m_ready_y == 1'b1 && m_pre_pre_valid_y == 1'b1 && m_valid_y == 1'b1)   //reset when ready is recieved
+			m_pre_pre_valid_y <= 1'b0;
+		else if (fmem_addr == unsigned'(@{[$M - 1]}) && conv_start == 1'b1)  //assert when 1 accumulation away from final result
+			m_pre_pre_valid_y <= 1'b1;
+
+		if (conv_done == 1'b1)   //reset after completion of convolution
+                        cnt_conv <= 0;
+		else if (m_pre_pre_valid_y == 1'b1 && m_pre_valid_y == 1'b0) //detect only for rise edge of pre-valid, require to be stable before loading xaddr
+			cnt_conv <= cnt_conv + 1;
+
+		if (cnt_conv == unsigned'(@{[$N - $M + 1]}) && m_valid_y == 1'b1 && m_ready_y == 1'b1)  //end of convolution
+		       conv_done <= 1'b1;
+	        else
+		       conv_done <= 1'b0;  //just generate a pulse
+
+		if (m_ready_y == 1'b1 && m_valid_y == 1'b1)  //reset when ready is recieved and valid was asserted, to clear the accumulator
+			conv_start_accum <= 1'b0;
+		else
+			conv_start_accum <= conv_start;
+
+
+	end
+end
+
+endmodule";
+
+# insantiate it inside the main module
+ print $fhMain "\n
+ //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ // output convolution control module instantitaion
+
+ logic [@{[$P-1]}:0]  m_ready_y_int;
+ logic [@{[$P-1]}:0]  m_valid_y_int;
+ logic [@{[$P-1]}:0]  conv_done_int;
+ logic [@{[$P-1]}:0]  load_xaddr_int;
+ logic [@{[$P-1]}:0]  load_faddr_int;
+ logic [@{[$P-1]}:0]  en_xaddr_incr;
+ logic [@{[$P-1]}:0]  en_faddr_incr_int;
+ logic [@{[$P-1]}:0]  en_accum;
+ logic [@{[$P-1]}:0]  reset_accum;
+ logic en_faddr_incr;
+ logic [$XMemSize_minus1:0]  load_xaddr_val [@{[$P-1]}:0];
+
+ // Control Module for Convulation and AXI on output with master
+ genvar k;
+ generate for (k=0; k<$P; k++) begin : ctrl_conv_output_block
+    ctrl_conv_output ctrl_conv_output_inst (
+          // inputs
+          .clk             (clk),
+	  .reset           (reset),
+	  .conv_start      (conv_start),
+	  .m_ready_y       (m_ready_y_int[k]),
+	  .fmem_addr       (fmem_addr),
+	  // outputs
+	  .conv_done       (conv_done_int[k]),
+	  .load_xaddr      (load_xaddr_int[k]),
+	  .load_faddr      (load_faddr_int[k]),
+	  .en_xaddr_incr   (en_xaddr_incr[k]),
+	  .en_faddr_incr   (en_faddr_incr_int[k]),
+	  .load_xaddr_val  (load_xaddr_val[k]),
+	  .reset_accum     (reset_accum[k]),
+	  .en_accum        (en_accum[k]),
+	  .m_valid_y       (m_valid_y_int[k])
+     );
+  end
+  endgenerate
+
+  assign en_faddr_incr = |en_faddr_incr_int;
+  assign conv_done = |conv_done_int;
+
+ ";
+
+}
+
+sub genYBuf
+{
+ my $DW_minus1 = $_[0]-1;
+ my $fhMain = $_[1];
+
+ my $designFile = "rtl_files_$N\_$M\_$T\_$P/y_buffer.sv";
+ open(my $fho, '>', $designFile) or die "$designFile could not be created";
+ print "../rtl_files_$N\_$M\_$T\_$P\/y_buffer.sv\n";
+
+ print $fho "
+//++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+// Master Slave pair: to buffer y[n] components in case of parallel MAC operations
+//
+module y_buffer #(
+	parameter T = 8
+) (
+	input			clk,
+	input			reset,
+	input [T-1:0]		s_data_in [@{[$P-1]}:0],
+	input [@{[$P-1]}:0]	s_valid_in,
+	output logic [@{[$P-1]}:0] s_ready_out,
+
+	input [@{[$P-1]}:0]	m_ready_in,
+	output logic [T-1:0]	m_data_out [@{[$P-1]}:0],
+	output logic [@{[$P-1]}:0] m_valid_out
+
+);
+
+  logic m_valid_out_int = |m_valid_out;
+
+  genvar i;
+  generate for (i=0; i <$P; i++) begin : y_buffer
+  // if there is any previous output which is not read yet,
+  // and there is a new request, pull the ready down
+     assign s_ready_out[i] = s_valid_in[i] == 1 && m_valid_out_int == 0;
+
+     always_ff @ (posedge clk) begin
+        if (reset == 1) begin
+           m_valid_out[i] <= 'b0;
+           m_data_out[i]  <= 'b0;
+        end else begin
+           if (m_valid_out[i] == 1'b1 && m_ready_in[i] == 1'b1) begin
+              m_valid_out[i] <= 'b0;
+	   end else if (s_valid_in[i] && s_ready_out[i]) begin
+              m_valid_out[i] <= 'b1;
+	      m_data_out[i]  <= s_data_in[i];
+           end
+        end
+     end
+
+  end
+  endgenerate
+
+endmodule";
+
+# insantiate it inside the main module
+ print $fhMain "\n
+
+ logic [$DW_minus1:0] m_data_out_y_rr[@{[$P-1]}:0];
+ logic [@{[$P-1]}:0]  m_ready_y_rr;
+ logic [@{[$P-1]}:0]  m_valid_y_rr;
+
+ //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ // Y_buffer instantiation
+ genvar l;
+ generate for (l=0; l<$P; l++) begin : y_buffer_block
+    y_buffer #(.T($T)) y_buffer_inst_0 (
+          // inputs
+	  .clk		(clk),
+	  .reset	(reset),
+	  .s_data_in	(mac_dout_vector[l]),
+	  .s_valid_in	(m_valid_y_int[l]),
+	  .m_ready_in	(m_ready_y_rr[l]),
+	  // outputs
+	  .s_ready_out	(m_ready_y_int[l]),
+	  .m_data_out	(m_data_out_y_rr[l]),
+	  .m_valid_out	(m_valid_y_rr[l])
+     );
+  end
+  endgenerate
+
+ ";
+
+}
+
+sub genSerialiser
+{
+  my $fhMain = $_[1];
+  my $ySize  = $_[2]; # same as x size, as it cannot be larger than that
+
+  print $fhMain "\n
+  logic [$ySize:0] y_offset;
+
+  always_comb begin
+     m_ready_y_rr = 'b0;
+     m_data_out_y = m_data_out_y_rr[y_offset%$P];
+     m_valid_y    = m_valid_y_rr[y_offset%$P];
+     m_ready_y_rr[y_offset%$P] = m_ready_y;
+  end
+
+  always_ff @ (posedge clk) begin
+     if (reset == 1) begin
+        y_offset <= 'b0;
+     end else begin
+        if (m_valid_y == 1'b1 && m_ready_y == 1'b1) begin
+	   if (y_offset == $N - $M)
+	      y_offset <= 'b0;
+	   else
+	      y_offset <= y_offset + 1;
+	end
+     end
+  end
+  ";
 }
 
 #-----------------------------------------------------
