@@ -47,7 +47,21 @@ module conv_$N\_$M\_$T\_$P (
 	output logic signed [$Tminus1:0] m_data_out_y,
 	output logic m_valid_y, 
 	input m_ready_y
-);";
+);
+
+ logic [@{[$P-1]}:0]  m_ready_y_int;
+ logic [@{[$P-1]}:0]  m_valid_y_int;
+ logic [@{[$P-1]}:0]  conv_done_int;
+ logic [@{[$P-1]}:0]  load_xaddr_int;
+ logic [@{[$P-1]}:0]  load_faddr_int;
+ logic [@{[$P-1]}:0]  en_xaddr_incr;
+ logic [@{[$P-1]}:0]  en_faddr_incr_int;
+ logic [@{[$P-1]}:0]  en_accum;
+ logic [@{[$P-1]}:0]  reset_accum;
+ logic en_faddr_incr;
+ logic load_faddr;
+
+ ";
 
 # generate ROM file 
 genROM($M, $fileROM, $fhMain, $T);
@@ -82,6 +96,9 @@ genMAC($T, $fhMain);
 
 # generate y buffer unit
 genYBuf($T, $fhMain);
+
+# generate serialiser to send data from y_buffers
+genSerialiser($fhMain, $xSize);
 
 print $fhMain "
 endmodule";
@@ -153,6 +170,26 @@ sub genROM
  
  logic [@{[$addrROM-1]}:0] fmem_addr;
  logic [@{[$T-1]}:0] fmem_data;
+ logic fmem_reset;
+ logic conv_done;
+
+ //Reset generation. 
+ //Conv_done is a one cycle pulse generated after convolution is complete
+ assign fmem_reset = reset || conv_done;
+
+ always_ff @ (posedge clk) begin
+    if (fmem_reset == 1)
+       fmem_addr <= 'b0;
+    else begin
+       if (load_faddr)
+          fmem_addr <= 'b0;
+       else if (en_faddr_incr) begin
+          fmem_addr <= fmem_addr + 1;
+          if (fmem_addr == $M)
+             fmem_addr <= 'b0;
+       end
+    end
+ end
 
  fmem_ROM fmem_inst (
  	.clk  (clk),
@@ -219,7 +256,6 @@ sub genCtrlMemWrite {
   logic xmem_reset;
   logic [$memSize:0] xmem_waddr;
   logic xmem_wr_en;
-  logic conv_done;
 
   assign xmem_reset = reset || conv_done;
 
@@ -281,9 +317,23 @@ sub genXRAM {
  logic [$memAddr:0] xmem_addr_vector [@{[$P-1]}:0];
  logic [$memAddr:0] xmem_raddr_vector [@{[$P-1]}:0];
  logic [$wordWidth_minus1:0] xmem_data_out_vector[@{[$P-1]}:0];
+ logic [$memAddr:0]  load_xaddr_val [@{[$P-1]}:0];
 
  genvar i;
  generate for (i=0; i<$P; i++) begin : xmem
+
+   always_ff @ (posedge clk) begin
+      if (reset == 1) begin
+         xmem_raddr_vector[i] <= 'b0;
+      end else begin
+         if (load_xaddr_int[i] == 1'b1) begin
+            xmem_raddr_vector[i] <= load_xaddr_val[i] * $P + i;
+         end else if (en_xaddr_incr[i]) begin
+            xmem_raddr_vector[i] <= xmem_raddr_vector[i] + 1;
+         end 
+      end
+   end
+
    assign xmem_addr_vector[i] = (conv_start) ? xmem_raddr_vector[i] : xmem_waddr; //TODO connect xmem_raddr_vector from mac_ctrl unit
    memory xmem_inst (
      .clk        (clk),
@@ -515,7 +565,7 @@ always_ff @(posedge clk) begin
 		else if (m_pre_pre_valid_y == 1'b1 && m_pre_valid_y == 1'b0) //detect only for rise edge of pre-valid, require to be stable before loading xaddr
 			cnt_conv <= cnt_conv + 1;
 
-		if (cnt_conv == unsigned'(@{[$N - $M + 1]}) && m_valid_y == 1'b1 && m_ready_y == 1'b1)  //end of convolution
+		if (cnt_conv > unsigned'(((@{[$N - $M + 1]})/$P) + 1) && m_valid_y == 1'b1 && m_ready_y == 1'b1)  //end of convolution
 		       conv_done <= 1'b1;
 	        else
 		       conv_done <= 1'b0;  //just generate a pulse
@@ -530,23 +580,12 @@ always_ff @(posedge clk) begin
 end
 
 endmodule";
+ close $fho;
 
 # insantiate it inside the main module
  print $fhMain "\n
  //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  // output convolution control module instantitaion
-
- logic [@{[$P-1]}:0]  m_ready_y_int;
- logic [@{[$P-1]}:0]  m_valid_y_int;
- logic [@{[$P-1]}:0]  conv_done_int;
- logic [@{[$P-1]}:0]  load_xaddr_int;
- logic [@{[$P-1]}:0]  load_faddr_int;
- logic [@{[$P-1]}:0]  en_xaddr_incr;
- logic [@{[$P-1]}:0]  en_faddr_incr_int;
- logic [@{[$P-1]}:0]  en_accum;
- logic [@{[$P-1]}:0]  reset_accum;
- logic en_faddr_incr;
- logic [$XMemSize_minus1:0]  load_xaddr_val [@{[$P-1]}:0];
 
  // Control Module for Convulation and AXI on output with master
  genvar k;
@@ -574,6 +613,7 @@ endmodule";
 
   assign en_faddr_incr = |en_faddr_incr_int;
   assign conv_done = |conv_done_int;
+  assign load_faddr = |load_faddr_int;
 
  ";
 
@@ -634,15 +674,17 @@ module y_buffer #(
 
 endmodule";
 
+ close $fho;
+
 # insantiate it inside the main module
  print $fhMain "\n
+ //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ // Y_buffer instantiation
 
  logic [$DW_minus1:0] m_data_out_y_rr[@{[$P-1]}:0];
  logic [@{[$P-1]}:0]  m_ready_y_rr;
  logic [@{[$P-1]}:0]  m_valid_y_rr;
 
- //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
- // Y_buffer instantiation
  genvar l;
  generate for (l=0; l<$P; l++) begin : y_buffer_block
     y_buffer #(.T($T)) y_buffer_inst_0 (
@@ -661,15 +703,20 @@ endmodule";
   endgenerate
 
  ";
-
 }
 
 sub genSerialiser
 {
-  my $fhMain = $_[1];
-  my $ySize  = $_[2]; # same as x size, as it cannot be larger than that
+  my $fhMain = $_[0];
+  # same as x size, as it cannot be larger than that
+  my $ySize  = $_[1]; 
 
-  print $fhMain "\n
+
+# insantiate it inside the main module
+ print $fhMain "
+ //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ // Adding serialiser logic to serialise outputs from multiple y_buffers to single output AXI interface
+
   logic [$ySize:0] y_offset;
 
   always_comb begin
