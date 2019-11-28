@@ -423,6 +423,8 @@ endmodule";
  logic [@{[$P-1]}:0] en_mac_vector;
  logic [@{[$P-1]}:0] reset_mac;
 
+ assign en_mac_vector = en_accum;
+
  genvar j;
  generate for(j = 0; j< $P; j++) begin : mac_block
 
@@ -649,7 +651,8 @@ module y_buffer #(
 
 );
 
-  logic m_valid_out_int = |m_valid_out;
+  logic m_valid_out_int;
+  assign m_valid_out_int = |m_valid_out;
 
   genvar i;
   generate for (i=0; i <$P; i++) begin : y_buffer
