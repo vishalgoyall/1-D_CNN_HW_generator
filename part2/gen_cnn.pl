@@ -324,12 +324,15 @@ sub genXRAM {
 
    always_ff @ (posedge clk) begin
       if (reset == 1) begin
-         xmem_raddr_vector[i] <= 'b0;
+         xmem_raddr_vector[i] <= i; // loading i-th location as the default of i-th MAC unit's x-mem
       end else begin
          if (load_xaddr_int[i] == 1'b1) begin
-            xmem_raddr_vector[i] <= load_xaddr_val[i] * $P + i;
+            xmem_raddr_vector[i] <= (load_xaddr_val[i] * $P) + i;
          end else if (en_xaddr_incr[i]) begin
-            xmem_raddr_vector[i] <= xmem_raddr_vector[i] + 1;
+	    if (xmem_raddr_vector[i] == $N-1)
+	       xmem_raddr_vector[i] <= 'b0;
+	    else
+               xmem_raddr_vector[i] <= xmem_raddr_vector[i] + 1;
          end 
       end
    end
@@ -410,7 +413,7 @@ sub genMAC
 		   adder_reg <= (adder_in > max_positive_val) ? max_positive_val : ((adder_in < min_negative_val) ? min_negative_val : adder_in);
    end
  
-   assign data_out = adder_reg;
+   assign data_out = (adder_reg[\$left(adder_reg)]) ? signed'('b0) : adder_reg;
    
 endmodule"; 
 
@@ -472,7 +475,7 @@ module ctrl_conv_output (
         input conv_start,     
         input m_ready_y,       
         input [$FMemSize_minus1:0] fmem_addr,       
-        output logic conv_done,       
+        input conv_done,       
         output logic load_xaddr,    
         output logic en_xaddr_incr, 
         output logic load_faddr,   
@@ -546,7 +549,6 @@ always_ff @(posedge clk) begin
 		cnt_conv          <= 0;     //convolution tracker
 		conv_start_accum  <= 1'b0;  //accum should start once cycle after first read from memory is done
 		m_pre_pre_valid_y <= 1'b0;  //required to hold mem address with valid signal assertion
-		conv_done         <= 1'b0;  //final dine signal
 	end
 	else begin
 		if (m_ready_y == 1'b1 && m_valid_y == 1'b1)  //reset when ready is recieved and valid was asserted
@@ -569,10 +571,10 @@ always_ff @(posedge clk) begin
 		else if (m_pre_pre_valid_y == 1'b1 && m_pre_valid_y == 1'b0) //detect only for rise edge of pre-valid, require to be stable before loading xaddr
 			cnt_conv <= cnt_conv + 1;
 
-		if (cnt_conv > unsigned'(((@{[$N - $M + 1]})/$P) + 1) && m_valid_y == 1'b1 && m_ready_y == 1'b1)  //end of convolution
-		       conv_done <= 1'b1;
-	        else
-		       conv_done <= 1'b0;  //just generate a pulse
+		//if (cnt_conv > unsigned'(((@{[$N - $M + 1]})/$P) + 1) && m_valid_y == 1'b1 && m_ready_y == 1'b1)  //end of convolution
+		//       conv_done <= 1'b1;
+	        //else
+		//       conv_done <= 1'b0;  //just generate a pulse
 
 		if (m_ready_y == 1'b1 && m_valid_y == 1'b1)  //reset when ready is recieved and valid was asserted, to clear the accumulator
 			conv_start_accum <= 1'b0;
@@ -601,8 +603,8 @@ endmodule";
 	  .conv_start      (conv_start),
 	  .m_ready_y       (m_ready_y_int[k]),
 	  .fmem_addr       (fmem_addr),
+	  .conv_done       (conv_done),
 	  // outputs
-	  .conv_done       (conv_done_int[k]),
 	  .load_xaddr      (load_xaddr_int[k]),
 	  .load_faddr      (load_faddr_int[k]),
 	  .en_xaddr_incr   (en_xaddr_incr[k]),
@@ -616,7 +618,7 @@ endmodule";
   endgenerate
 
   assign en_faddr_incr = |en_faddr_incr_int;
-  assign conv_done = |conv_done_int;
+  // assign conv_done = |conv_done_int;
   assign load_faddr = |load_faddr_int;
 
  ";
@@ -730,11 +732,15 @@ sub genSerialiser
   always_ff @ (posedge clk) begin
      if (reset == 1) begin
         y_offset <= 'b0;
+        conv_done <= 'b0;
      end else begin
-        if (m_valid_y == 1'b1 && m_ready_y == 1'b1) begin
-	   if (y_offset == $N - $M)
+        if (conv_done == 1'b1)
+           conv_done <= 'b0;
+        else if (m_valid_y == 1'b1 && m_ready_y == 1'b1) begin
+	   if (y_offset == $N - $M) begin
 	      y_offset <= 'b0;
-	   else
+	      conv_done <= 'b1;
+	   end else
 	      y_offset <= y_offset + 1;
 	end
      end
