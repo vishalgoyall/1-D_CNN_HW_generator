@@ -89,7 +89,7 @@ genXRAM($T, $N, $fhMain, $P);
 genCtrlMAC($xSize,$fhMain,$P);
 
 # generate output control module
-genCtrlConvOutput($T, $fhMain, $xSize, $fSize);
+genCtrlConvOutput($T, $fhMain, $xSize, $fSize,$P);
 
 # generate MAC unit
 genMAC($T, $fhMain);
@@ -430,7 +430,7 @@ endmodule";
 
    mac mac_inst (
        .clk          (clk),
-       .reset        (reset_mac),
+       .reset        (reset_mac[j]),
        .xmem_data    (xmem_data_out_vector[j]),
        .fmem_data    (fmem_data),
        .en_mult_reg  (conv_start),
@@ -447,8 +447,9 @@ sub genCtrlConvOutput
 {
  my $DW_minus1 = $_[0]-1;
  my $fhMain = $_[1];
- my $FMemSize_minus1 = $_[2];
- my $XMemSize_minus1 = $_[3];
+ my $XMemSize_minus1 = $_[2];
+ my $FMemSize_minus1 = $_[3];
+ my $P = $_[4];
 
  my $designFile = "rtl_files_$N\_$M\_$T\_$P/ctrl_conv_output.sv";
  open(my $fho, '>', $designFile) or die "$designFile could not be created";
@@ -482,38 +483,39 @@ module ctrl_conv_output (
 
 logic [$XMemSize_minus1:0] cnt_conv;
 logic m_pre_pre_valid_y, conv_start_accum, m_pre_valid_y;
+logic load_xaddr_val_int;
 
 //Generate Control Signals for Address counters in memories 
 always_comb begin
     if (conv_start == 1'b1) begin   //if conv has not started then no action required
 	if (m_ready_y == 1'b1 && m_valid_y == 1'b1) begin //when data transaction is done at output and new computation is required
-		load_xaddr     = 1'b1;       //load xaddr counter for next conv calculation
-		load_faddr     = 1'b1;       //load faddr counter for next conv calculation
-		load_xaddr_val = cnt_conv;   //load xaddr counter with the starting address of next set to be done
-		en_xaddr_incr  = 1'b0;       //pause counter from being incremented
-		en_faddr_incr  = 1'b0;       //pause counter from being incremented
+		load_xaddr         = 1'b1;       //load xaddr counter for next conv calculation
+		load_faddr         = 1'b1;       //load faddr counter for next conv calculation
+		load_xaddr_val     = cnt_conv;   //load xaddr counter with the starting address of next set to be done
+		en_xaddr_incr      = 1'b0;       //pause counter from being incremented
+		en_faddr_incr      = 1'b0;       //pause counter from being incremented
 	end
 	else if (m_pre_pre_valid_y == 1'b1) begin
-         	load_xaddr     = 1'b0;       
-		load_faddr     = 1'b0;       
-		load_xaddr_val = cnt_conv;   //dont care
-		en_xaddr_incr  = 1'b0;       //pause counter from being incremented
-		en_faddr_incr  = 1'b0;       //pause counter from being incremented
+         	load_xaddr         = 1'b0;       
+		load_faddr         = 1'b0;       
+		load_xaddr_val     = cnt_conv;   //dont care
+		en_xaddr_incr      = 1'b0;       //pause counter from being incremented
+		en_faddr_incr      = 1'b0;       //pause counter from being incremented
 	end
 	else begin
-		load_xaddr     = 1'b0;       
-		load_faddr     = 1'b0;       
-		load_xaddr_val = cnt_conv;   //dont care
-		en_xaddr_incr  = 1'b1;       //pause counter from being incremented
-		en_faddr_incr  = 1'b1;       //pause counter from being incremented
+		load_xaddr         = 1'b0;       
+		load_faddr         = 1'b0;       
+		load_xaddr_val     = cnt_conv;   //dont care
+		en_xaddr_incr      = 1'b1;       //pause counter from being incremented
+		en_faddr_incr      = 1'b1;       //pause counter from being incremented
 	end
     end
     else begin
-	load_xaddr     = 1'b0;       
-	load_faddr     = 1'b0;       
-	load_xaddr_val = 0;   
-	en_xaddr_incr  = 1'b0;  
-	en_faddr_incr  = 1'b0; 
+	load_xaddr         = 1'b0;       
+	load_faddr         = 1'b0;       
+	load_xaddr_val     = 'b0;   
+	en_xaddr_incr      = 1'b0;  
+	en_faddr_incr      = 1'b0; 
     end
 end
 
@@ -637,12 +639,12 @@ module y_buffer #(
 ) (
 	input			clk,
 	input			reset,
-	input [T-1:0]		s_data_in [@{[$P-1]}:0],
+	input signed [@{[$T-1]}:0]	s_data_in [@{[$P-1]}:0],
 	input [@{[$P-1]}:0]	s_valid_in,
 	output logic [@{[$P-1]}:0] s_ready_out,
 
 	input [@{[$P-1]}:0]	m_ready_in,
-	output logic [T-1:0]	m_data_out [@{[$P-1]}:0],
+	output logic signed [T-1:0]	m_data_out [@{[$P-1]}:0],
 	output logic [@{[$P-1]}:0] m_valid_out
 
 );
@@ -681,26 +683,22 @@ endmodule";
  //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  // Y_buffer instantiation
 
- logic [$DW_minus1:0] m_data_out_y_rr[@{[$P-1]}:0];
+ logic signed [$DW_minus1:0] m_data_out_y_rr[@{[$P-1]}:0];
  logic [@{[$P-1]}:0]  m_ready_y_rr;
  logic [@{[$P-1]}:0]  m_valid_y_rr;
 
- genvar l;
- generate for (l=0; l<$P; l++) begin : y_buffer_block
     y_buffer #(.T($T)) y_buffer_inst_0 (
           // inputs
 	  .clk		(clk),
 	  .reset	(reset),
-	  .s_data_in	(mac_dout_vector[l]),
-	  .s_valid_in	(m_valid_y_int[l]),
-	  .m_ready_in	(m_ready_y_rr[l]),
+	  .s_data_in	(mac_dout_vector),
+	  .s_valid_in	(m_valid_y_int),
+	  .m_ready_in	(m_ready_y_rr),
 	  // outputs
-	  .s_ready_out	(m_ready_y_int[l]),
-	  .m_data_out	(m_data_out_y_rr[l]),
-	  .m_valid_out	(m_valid_y_rr[l])
+	  .s_ready_out	(m_ready_y_int),
+	  .m_data_out	(m_data_out_y_rr),
+	  .m_valid_out	(m_valid_y_rr)
      );
-  end
-  endgenerate
 
  ";
 }
