@@ -85,9 +85,6 @@ print $fhMain "
 # generate RAM file
 genXRAM($T, $N, $fhMain, $P);
 
-# TODO generate xmem read ctrl and MAC ctrl logic
-genCtrlMAC($xSize,$fhMain,$P);
-
 # generate output control module
 genCtrlConvOutput($T, $fhMain, $xSize, $fSize,$P);
 
@@ -337,7 +334,7 @@ sub genXRAM {
       end
    end
 
-   assign xmem_addr_vector[i] = (conv_start) ? xmem_raddr_vector[i] : xmem_waddr; //TODO connect xmem_raddr_vector from mac_ctrl unit
+   assign xmem_addr_vector[i] = (conv_start) ? xmem_raddr_vector[i] : xmem_waddr;
    memory xmem_inst (
      .clk        (clk),
      .data_in    (s_data_in_x),
@@ -413,6 +410,7 @@ sub genMAC
 		   adder_reg <= (adder_in > max_positive_val) ? max_positive_val : ((adder_in < min_negative_val) ? min_negative_val : adder_in);
    end
  
+   // Adding relu logic
    assign data_out = (adder_reg[\$left(adder_reg)]) ? signed'('b0) : adder_reg;
    
 endmodule"; 
@@ -448,6 +446,9 @@ endmodule";
  close $fho;
 }
 
+#-----------------------------------------------------
+# Subroutine to generate conv output control module
+#-----------------------------------------------------   
 sub genCtrlConvOutput
 {
  my $DW_minus1 = $_[0]-1;
@@ -491,6 +492,9 @@ logic m_pre_pre_valid_y, conv_start_accum, m_pre_valid_y;
 
 logic [$XMemSize_minus1:0] num_mac_runs;
 
+// to keep track of number of times each MAC unit should be run
+// In case, N-M+1 is divisible by P, it will be equal to the quotient
+// Otherwise, it will be quotient+1, to take care of remainder y[n] components
 assign num_mac_runs = (unsigned'((@{[$N - $M + 1]}) % $P) == 0) ? (unsigned'((@{[$N - $M + 1]})/$P)) : (unsigned'((@{[$N - $M + 1]})/$P)) + 1;
 
 //Generate Control Signals for Address counters in memories 
@@ -628,6 +632,9 @@ endmodule";
 
 }
 
+#-----------------------------------------------------
+# Subroutine to generate Y buffers for each y[n] component
+#-----------------------------------------------------   
 sub genYBuf
 {
  my $DW_minus1 = $_[0]-1;
@@ -658,14 +665,17 @@ module y_buffer #(
 );
 
   logic m_valid_out_int;
-  assign m_valid_out_int = |m_valid_out;
+  // to check if any of the outputs is still pending
+  assign m_valid_out_int = |m_valid_out; 
 
   genvar i;
   generate for (i=0; i <$P; i++) begin : y_buffer
+
   // if there is any previous output which is not read yet,
   // and there is a new request, pull the ready down
      assign s_ready_out[i] = s_valid_in[i] == 1 && m_valid_out_int == 0;
 
+  // generating output valid and data
      always_ff @ (posedge clk) begin
         if (reset == 1 || conv_output_done == 1) begin
            m_valid_out[i] <= 'b0;
@@ -692,9 +702,10 @@ endmodule";
  //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  // Y_buffer instantiation
 
- logic signed [$DW_minus1:0] m_data_out_y_rr[@{[$P-1]}:0];
- logic [@{[$P-1]}:0]  m_ready_y_rr;
- logic [@{[$P-1]}:0]  m_valid_y_rr;
+ // Signals to/from y_buffers from/to serialiser
+ logic signed [$DW_minus1:0] m_data_out_y_ser[@{[$P-1]}:0];
+ logic [@{[$P-1]}:0]  m_ready_y_ser;
+ logic [@{[$P-1]}:0]  m_valid_y_ser;
  logic conv_output_done;
 
     y_buffer #(.T($T)) y_buffer_inst_0 (
@@ -704,16 +715,19 @@ endmodule";
 	  .conv_output_done (conv_output_done),
 	  .s_data_in        (mac_dout_vector),
 	  .s_valid_in       (m_valid_y_int),
-	  .m_ready_in       (m_ready_y_rr),
+	  .m_ready_in       (m_ready_y_ser),
 	  // outputs
 	  .s_ready_out      (m_ready_y_int),
-	  .m_data_out       (m_data_out_y_rr),
-	  .m_valid_out      (m_valid_y_rr)
+	  .m_data_out       (m_data_out_y_ser),
+	  .m_valid_out      (m_valid_y_ser)
      );
 
  ";
 }
 
+#-----------------------------------------------------
+# Subroutine to generate serialise outputs from different MAC units' y_buffers to a single AXI stream
+#-----------------------------------------------------   
 sub genSerialiser
 {
   my $fhMain = $_[0];
@@ -729,10 +743,10 @@ sub genSerialiser
   logic [$ySize:0] y_offset;
 
   always_comb begin
-     m_ready_y_rr = 'b0;
-     m_data_out_y = m_data_out_y_rr[y_offset%$P];
-     m_valid_y    = m_valid_y_rr[y_offset%$P];
-     m_ready_y_rr[y_offset%$P] = m_ready_y;
+     m_ready_y_ser = 'b0;
+     m_data_out_y = m_data_out_y_ser[y_offset%$P];
+     m_valid_y    = m_valid_y_ser[y_offset%$P];
+     m_ready_y_ser[y_offset%$P] = m_ready_y;
   end
 
   always_ff @ (posedge clk) begin
@@ -743,9 +757,9 @@ sub genSerialiser
 	if (conv_output_done == 'b1)
 	   conv_output_done <= 'b0;
         else if (m_valid_y == 1'b1 && m_ready_y == 1'b1) begin
-	   if (y_offset == $N - $M) begin
-	      y_offset <= 'b0;
-	      conv_output_done <= 'b1;
+	   if (y_offset == $N - $M) begin // Once N-M+1 y[n] components have been received,
+	      y_offset <= 'b0;		  // reset offset to 0
+	      conv_output_done <= 'b1;    // and assert done signal
 	   end else begin
 	      y_offset <= y_offset + 1;
 	   end
@@ -754,21 +768,4 @@ sub genSerialiser
   end
   ";
 }
-
-#-----------------------------------------------------
-# Subroutine to MAC unit
-#-----------------------------------------------------
-sub genCtrlMAC {
- my $memSize = $_[0];
- my $fhMain  = $_[1];
- my $P       = $_[2];
-
- #my $designFile = "rtl_files_$N\_$M\_$T\_$P/ctrl_mac.sv";  # output RTL file paths
- #open(my $fho, '>', $designFile) or die "$designFile could not be created";
- #print "../rtl_files_$N\_$M\_$T\_$P\/ctrl_mac.sv\n";
- #close $fho;
- 
- #TODO
-}
-
 
