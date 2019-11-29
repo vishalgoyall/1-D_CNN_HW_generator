@@ -323,7 +323,7 @@ sub genXRAM {
  generate for (i=0; i<$P; i++) begin : xmem
 
    always_ff @ (posedge clk) begin
-      if (reset == 1) begin
+      if (reset == 1 || conv_done == 1) begin
          xmem_raddr_vector[i] <= i; // loading i-th location as the default of i-th MAC unit's x-mem
       end else begin
          if (load_xaddr_int[i] == 1'b1) begin
@@ -475,7 +475,7 @@ module ctrl_conv_output (
         input conv_start,     
         input m_ready_y,       
         input [$FMemSize_minus1:0] fmem_addr,       
-        input conv_done,       
+        output logic conv_done,       
         output logic load_xaddr,    
         output logic en_xaddr_incr, 
         output logic load_faddr,   
@@ -488,7 +488,10 @@ module ctrl_conv_output (
 
 logic [$XMemSize_minus1:0] cnt_conv;
 logic m_pre_pre_valid_y, conv_start_accum, m_pre_valid_y;
-logic load_xaddr_val_int;
+
+logic [$XMemSize_minus1:0] num_mac_runs;
+
+assign num_mac_runs = (unsigned'((@{[$N - $M + 1]}) % $P) == 0) ? (unsigned'((@{[$N - $M + 1]})/$P)) : (unsigned'((@{[$N - $M + 1]})/$P)) + 1;
 
 //Generate Control Signals for Address counters in memories 
 always_comb begin
@@ -571,10 +574,10 @@ always_ff @(posedge clk) begin
 		else if (m_pre_pre_valid_y == 1'b1 && m_pre_valid_y == 1'b0) //detect only for rise edge of pre-valid, require to be stable before loading xaddr
 			cnt_conv <= cnt_conv + 1;
 
-		//if (cnt_conv > unsigned'(((@{[$N - $M + 1]})/$P) + 1) && m_valid_y == 1'b1 && m_ready_y == 1'b1)  //end of convolution
-		//       conv_done <= 1'b1;
-	        //else
-		//       conv_done <= 1'b0;  //just generate a pulse
+		if (cnt_conv > (num_mac_runs-1) && m_valid_y == 1'b1 && m_ready_y == 1'b1)  //end of convolution
+		       conv_done <= 1'b1;
+	        else
+		       conv_done <= 1'b0;  //just generate a pulse
 
 		if (m_ready_y == 1'b1 && m_valid_y == 1'b1)  //reset when ready is recieved and valid was asserted, to clear the accumulator
 			conv_start_accum <= 1'b0;
@@ -603,8 +606,8 @@ endmodule";
 	  .conv_start      (conv_start),
 	  .m_ready_y       (m_ready_y_int[k]),
 	  .fmem_addr       (fmem_addr),
-	  .conv_done       (conv_done),
 	  // outputs
+	  .conv_done       (conv_done_int[k]),
 	  .load_xaddr      (load_xaddr_int[k]),
 	  .load_faddr      (load_faddr_int[k]),
 	  .en_xaddr_incr   (en_xaddr_incr[k]),
@@ -618,7 +621,7 @@ endmodule";
   endgenerate
 
   assign en_faddr_incr = |en_faddr_incr_int;
-  // assign conv_done = |conv_done_int;
+  assign conv_done = |conv_done_int;
   assign load_faddr = |load_faddr_int;
 
  ";
@@ -643,6 +646,7 @@ module y_buffer #(
 ) (
 	input			clk,
 	input			reset,
+	input			conv_output_done,
 	input signed [@{[$T-1]}:0]	s_data_in [@{[$P-1]}:0],
 	input [@{[$P-1]}:0]	s_valid_in,
 	output logic [@{[$P-1]}:0] s_ready_out,
@@ -663,7 +667,7 @@ module y_buffer #(
      assign s_ready_out[i] = s_valid_in[i] == 1 && m_valid_out_int == 0;
 
      always_ff @ (posedge clk) begin
-        if (reset == 1) begin
+        if (reset == 1 || conv_output_done == 1) begin
            m_valid_out[i] <= 'b0;
            m_data_out[i]  <= 'b0;
         end else begin
@@ -691,18 +695,20 @@ endmodule";
  logic signed [$DW_minus1:0] m_data_out_y_rr[@{[$P-1]}:0];
  logic [@{[$P-1]}:0]  m_ready_y_rr;
  logic [@{[$P-1]}:0]  m_valid_y_rr;
+ logic conv_output_done;
 
     y_buffer #(.T($T)) y_buffer_inst_0 (
           // inputs
-	  .clk		(clk),
-	  .reset	(reset),
-	  .s_data_in	(mac_dout_vector),
-	  .s_valid_in	(m_valid_y_int),
-	  .m_ready_in	(m_ready_y_rr),
+	  .clk	            (clk),
+	  .reset            (reset),
+	  .conv_output_done (conv_output_done),
+	  .s_data_in        (mac_dout_vector),
+	  .s_valid_in       (m_valid_y_int),
+	  .m_ready_in       (m_ready_y_rr),
 	  // outputs
-	  .s_ready_out	(m_ready_y_int),
-	  .m_data_out	(m_data_out_y_rr),
-	  .m_valid_out	(m_valid_y_rr)
+	  .s_ready_out      (m_ready_y_int),
+	  .m_data_out       (m_data_out_y_rr),
+	  .m_valid_out      (m_valid_y_rr)
      );
 
  ";
@@ -732,16 +738,17 @@ sub genSerialiser
   always_ff @ (posedge clk) begin
      if (reset == 1) begin
         y_offset <= 'b0;
-        conv_done <= 'b0;
+	conv_output_done <= 'b0;
      end else begin
-        if (conv_done == 1'b1)
-           conv_done <= 'b0;
+	if (conv_output_done == 'b1)
+	   conv_output_done <= 'b0;
         else if (m_valid_y == 1'b1 && m_ready_y == 1'b1) begin
 	   if (y_offset == $N - $M) begin
 	      y_offset <= 'b0;
-	      conv_done <= 'b1;
-	   end else
+	      conv_output_done <= 'b1;
+	   end else begin
 	      y_offset <= y_offset + 1;
+	   end
 	end
      end
   end
