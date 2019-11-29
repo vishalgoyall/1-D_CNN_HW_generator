@@ -23,7 +23,7 @@ echo "RTL files and File List dumped in rtl_files_$1_$2_$3_$4 directory"
 echo "\n>>> Compilation and Simulating generated files"
 cd tbgen_$1_$2_$3_$4
 vlog -f  ../rtl_files_$1_$2_$3_$4/rtl_file_list ./tb_conv_$1_$2_$3_$4.sv
-#vsim tb_conv_$1_$2_$3_$4 -c -do "run -all"
+vsim tb_conv_$1_$2_$3_$4 -c -do "run -all"
 cd ../
 
 #echo "\n>>> Creating synthesis directory"
