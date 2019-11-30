@@ -673,7 +673,7 @@ module y_buffer #(
 
   // if there is any previous output which is not read yet,
   // and there is a new request, pull the ready down
-     assign s_ready_out[i] = s_valid_in[i] == 1 && m_valid_out_int == 0;
+     assign s_ready_out[i] = s_valid_in[i] == 1 && m_valid_out_int == 0 && conv_output_done == 0;
 
   // generating output valid and data
      always_ff @ (posedge clk) begin
