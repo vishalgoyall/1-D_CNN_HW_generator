@@ -15,15 +15,17 @@ use POSIX qw(ceil);
 ###############################################################
 
 # Command line arguments
- my $N       = $ARGV[0];
- my $M       = $ARGV[1];
- my $T       = $ARGV[2];
- my $P       = $ARGV[3];
- my $fileROM = $ARGV[4];
+ my $N             = $ARGV[0];
+ my $M             = $ARGV[1];
+ my $T             = $ARGV[2];
+ my $P             = $ARGV[3];
+ my $fileROM       = $ARGV[4];
+ my $genSubModules = $ARGV[5]; # Set this to 1 if submodules like mac, y_buffer need to be created; 0 if they are already created, but just need to be instantiated
+ my $topHier       = $ARGV[6];
 
 # Open toplevel SV design file
- my $fileTop = "rtl_files_$N\_$M\_$T\_$P/conv_$N\_$M\_$T\_$P.sv";
- print "../rtl_files_$N\_$M\_$T\_$P\/conv_$N\_$M\_$T\_$P.sv\n";
+ my $fileTop = "$topHier/conv_$N\_$M\_$T\_$P.sv";
+ print "../$topHier\/conv_$N\_$M\_$T\_$P.sv\n";
 
  open(my $fhMain, '>', $fileTop) or die "$fileTop could not be created";  
 
@@ -122,8 +124,8 @@ sub genROM
  my $fileROM = $_[0];  # ROM file should be 1st Argument
  my $fhMain  = $_[1];  # Top level design file handle should be 2nd Argument
  
- my $designFile = "rtl_files_$N\_$M\_$T\_$P/fmem_ROM.sv";  # output RTL file paths
- print "../rtl_files_$N\_$M\_$T\_$P\/fmem_ROM.sv\n";
+ my $designFile = "$topHier/fmem_ROM_$N\_$M.sv";  # output RTL file paths
+ print "../$topHier\/fmem_ROM_$N\_$M.sv\n";
  my $rowCnt = 0;
  
  open(my $fhi, '<', $fileROM) or die "$fileROM could not be opened";         #create input file handle
@@ -132,7 +134,7 @@ sub genROM
  #start printing module
  print $fho "
  // SV file containing ROM type memory storage for FMEM words, picked from constant file input to gen_cnn.pl script\n
- module fmem_ROM #(parameter ADDR_ROM = 6, parameter WORD_SIZE = 8) (
+ module fmem_ROM_$N\_$M #(parameter ADDR_ROM = 6, parameter WORD_SIZE = 8) (
     input clk,
     input [ADDR_ROM-1:0] addr,
     output logic [WORD_SIZE-1:0] z
@@ -193,7 +195,7 @@ sub genROM
     end
  end
 
- fmem_ROM #(.ADDR_ROM(ADDR_ROM), .WORD_SIZE(T)) fmem_inst (
+ fmem_ROM_$N\_$M #(.ADDR_ROM(ADDR_ROM), .WORD_SIZE(T)) fmem_inst (
  	.clk  (clk),
 	.addr (fmem_addr),
 	.z    (fmem_data)
@@ -208,12 +210,13 @@ sub genCtrlMemWrite {
 
  my $fhMain   = $_[0]; 
 
- my $designFile = "rtl_files_$N\_$M\_$T\_$P/ctrl_mem_write.sv";  
- print "../rtl_files_$N\_$M\_$T\_$P\/ctrl_mem_write.sv\n";  
- open(my $fho, '>', $designFile) or die "$designFile could not be created";  
+ my $designFile = "$topHier/ctrl_mem_write.sv";  
+ if ($genSubModules == 1) {
+    print "../$topHier\/ctrl_mem_write.sv\n";  
+    open(my $fho, '>', $designFile) or die "$designFile could not be created";  
 
- #print module
- print $fho "
+    #print module
+    print $fho "
  //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  // 1. Generate control signals to load XMEMs with input data from Master
  // 2. Follow AXI protocol and generate READY signal
@@ -249,6 +252,9 @@ sub genCtrlMemWrite {
  
  endmodule";
 
+  close $fho;
+ }
+
  #print instantiation
  print $fhMain "\n
  //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -272,7 +278,6 @@ sub genCtrlMemWrite {
 
   assign xmem_full = ~s_ready_x;\n";
 
-  close $fho;
 }
 
 #---------------------------------------------------
@@ -282,8 +287,9 @@ sub genXRAM {
  
  my $fhMain   = $_[0]; 
  
- my $designFile = "rtl_files_$N\_$M\_$T\_$P/memory.sv";  
- print "../rtl_files_$N\_$M\_$T\_$P\/memory.sv\n";  
+ my $designFile = "$topHier/memory.sv";  
+ if ($genSubModules == 1) {
+ print "../$topHier\/memory.sv\n";  
  open(my $fho, '>', $designFile) or die "$designFile could not be created";  
  
  
@@ -304,6 +310,10 @@ sub genXRAM {
       mem[addr] <= data_in;
    end
  endmodule";
+
+ close $fho;
+
+ }
  
  #print instantiation
  my $instCnt = 0;
@@ -345,7 +355,6 @@ sub genXRAM {
  end
  endgenerate\n";
 
- close $fho;
 }
 
 #-----------------------------------------------------
@@ -355,9 +364,10 @@ sub genMAC
 {
  my $fhMain = $_[0];
 
- my $designFile = "rtl_files_$N\_$M\_$T\_$P/mac.sv";  # output RTL file paths
+ my $designFile = "$topHier/mac.sv";  # output RTL file paths
+ if ($genSubModules == 1) {
  open(my $fho, '>', $designFile) or die "$designFile could not be created";
- print "../rtl_files_$N\_$M\_$T\_$P\/mac.sv\n";
+ print "../$topHier\/mac.sv\n";
 
  #print module
  print $fho "
@@ -412,6 +422,10 @@ sub genMAC
    
 endmodule"; 
 
+ close $fho;
+
+}
+
  # print instantiation
    print $fhMain "\n
  //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -440,7 +454,6 @@ endmodule";
  end
  endgenerate\n";
 
- close $fho;
 }
 
 #-----------------------------------------------------
@@ -450,9 +463,10 @@ sub genCtrlConvOutput
 {
  my $fhMain = $_[0];
 
- my $designFile = "rtl_files_$N\_$M\_$T\_$P/ctrl_conv_output.sv";
+ my $designFile = "$topHier/ctrl_conv_output.sv";
+ if ($genSubModules == 1) {
  open(my $fho, '>', $designFile) or die "$designFile could not be created";
- print "../rtl_files_$N\_$M\_$T\_$P\/ctrl_conv_output.sv\n";
+ print "../$topHier\/ctrl_conv_output.sv\n";
 
  print $fho "
 
@@ -586,7 +600,10 @@ always_ff @(posedge clk) begin
 end
 
 endmodule";
+
  close $fho;
+
+}
 
 # insantiate it inside the main module
  print $fhMain "\n
@@ -632,9 +649,10 @@ sub genYBuf
 {
  my $fhMain = $_[0];
 
- my $designFile = "rtl_files_$N\_$M\_$T\_$P/y_buffer.sv";
+ my $designFile = "$topHier/y_buffer.sv";
+ if ($genSubModules == 1) {
  open(my $fho, '>', $designFile) or die "$designFile could not be created";
- print "../rtl_files_$N\_$M\_$T\_$P\/y_buffer.sv\n";
+ print "../$topHier\/y_buffer.sv\n";
 
  print $fho "
 //++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -688,6 +706,9 @@ module y_buffer #(
 endmodule";
 
  close $fho;
+
+}
+
 
 # insantiate it inside the main module
  print $fhMain "\n
