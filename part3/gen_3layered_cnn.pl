@@ -84,7 +84,7 @@ use POSIX qw(ceil);
 
 	 #find best possible solution
 	 my $bestOptim;
-	 my $bestOptimIndex;
+	 my @index;
 	 for my $i (0..(scalar(@P1_vals)-1)) {
 		 my $Layer1_cycles = (3+$M1)*($L1/$P1_vals[$i]);
 		 my $Layer2_cycles = (3+$M2)*($L2/$P2_vals[$i]);
@@ -93,17 +93,38 @@ use POSIX qw(ceil);
 		 print $logFile "**$currCycles cycles (convolution only) if we use P1 P2 P3 at index $i\n";
 		 if ($i == 0) {
 			 $bestOptim = $currCycles;
-			 $bestOptimIndex = $i;
+			 push(@index,$i);
 		 }
 		 elsif ($currCycles < $bestOptim) {
 			 $bestOptim = $currCycles;
-			 $bestOptimIndex = $i;
+			 @index = (); #if new better solution is found, empty array consisting of similar values
+			 push(@index,$i);
+
+		 }
+		 elsif ($currCycles == $bestOptim) {
+			 push(@index,$i);
 		 }
 	 }
 
-	 $P1 = $P1_vals[$bestOptimIndex];
-	 $P2 = $P2_vals[$bestOptimIndex];
-	 $P3 = $P3_vals[$bestOptimIndex];
+	 my $bestOptimIndex;
+	 if (scalar(@index) > 1) {   #if multiple combinations with same convolution cycles exist, find best possible solution
+		 my $min_units = $A;
+		 for my $j (0..(scalar(@index)-1)) {
+			 if ($P1_vals[$index[$j]] + $P2_vals[$index[$j]] + $P3_vals[$index[$j]] <= $min_units) {
+				 $min_units = $P1_vals[$index[$j]] + $P2_vals[$index[$j]] + $P3_vals[$index[$j]];
+		                 $P1 = $P1_vals[$index[$j]];
+		                 $P2 = $P2_vals[$index[$j]];
+		                 $P3 = $P3_vals[$index[$j]];
+				 $bestOptimIndex = $index[$j];
+			 }
+		 }
+	 }
+	 else { #assign P1, P2 P3 values
+		 $P1             = $P1_vals[$index[0]];
+		 $P2             = $P2_vals[$index[0]];
+		 $P3             = $P3_vals[$index[0]];
+		 $bestOptimIndex = $index[0];
+	 }
 	 
 	 print $logFile "\n--> Best possible combination is for index $bestOptimIndex : P1 = $P1; P2 = $P2; P3 = $P3\n\n";
 
