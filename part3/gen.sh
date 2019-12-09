@@ -7,8 +7,8 @@ mkdir rtl_files_$1_$2_$3_$4_$5_$6
 rm -r -f tbgen_$1_$2_$3_$4_$5_$6
 mkdir tbgen_$1_$2_$3_$4_$5_$6
 
-#rm -r -f synth_$1_$2_$3_$4
-#mkdir synth_$1_$2_$3_$4
+rm -r -f synth_$1_$2_$3_$4_$5_$6
+mkdir synth_$1_$2_$3_$4_$5_$6
 
 echo ">>> Generating Constant ROM File and TestBench"
 cp -f tb_ref/* tbgen_$1_$2_$3_$4_$5_$6/.
@@ -26,13 +26,19 @@ vlog -f  ../rtl_files_$1_$2_$3_$4_$5_$6/rtl_file_list ./tb_multi_$1_$2_$3_$4_$5_
 vsim tb_multi_$1_$2_$3_$4_$5_$6 -c -do "run -all"
 cd ../
 
-#echo "\n>>> Creating synthesis directory"
-#cd synth_ref
-#perl gensynth.pl $1 $2 $3 $4
-#cat synth1.tcl synth2.tcl > runsynth.tcl
-#cd ../
-#cp -f synth_ref/runsynth.tcl synth_$1_$2_$3_$4/.
-#cp -f synth_ref/setupdc.tcl synth_$1_$2_$3_$4/.
+echo "\n>>> Creating synthesis directory"
+set P1=`cat log.txt | grep "final P1" | sed 's/final P1 = //'`
+echo $P1
+set P2=`cat log.txt | grep "final P2" | sed 's/final P2 = //'`
+echo $P2
+set P3=`cat log.txt | grep "final P3" | sed 's/final P3 = //'`
+echo $P3
+cd synth_ref
+perl gensynth.pl $1 $2 $3 $4 $5 $6 $P1 $P2 $P3
+cat synth1.tcl synth2.tcl > runsynth.tcl
+cd ../
+cp -f synth_ref/runsynth.tcl synth_$1_$2_$3_$4_$5_$6/.
+cp -f synth_ref/setupdc.tcl synth_$1_$2_$3_$4_$5_$6/.
 
 
 

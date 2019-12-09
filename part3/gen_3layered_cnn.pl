@@ -127,6 +127,9 @@ use POSIX qw(ceil);
 	 }
 	 
 	 print $logFile "\n--> Best possible combination is for index $bestOptimIndex : P1 = $P1; P2 = $P2; P3 = $P3\n\n";
+	 print $logFile "\nfinal P1 = $P1";
+	 print $logFile "\nfinal P2 = $P2";
+	 print $logFile "\nfinal P3 = $P3";
 
  } else {
 	 print $logFile "Minimum expected value of A is 3 as this is a 3 layer CNN system"
@@ -281,4 +284,5 @@ use POSIX qw(ceil);
  endmodule";
 
  close $topWrapper;
+ close $logFile
 
