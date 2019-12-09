@@ -16,6 +16,6 @@ set CLK_NAME \"clk\";
 set CLK_PERIOD 0.92
 set RST_NAME \"reset\";
 set TOP_MOD_NAME \"conv_$N\_$M\_$T\_$P\";
-set SRC_FILE [list \"../rtl_files_$N\_$M\_$T\_$P\/conv_$N\_$M\_$T\_$P.sv\" \"../rtl_files_$N\_$M\_$T\_$P\/fmem_ROM.sv\" \"../rtl_files_$N\_$M\_$T\_$P\/memory.sv\" \"../rtl_files_$N\_$M\_$T\_$P\/ctrl_mem_write.sv\" \"../rtl_files_$N\_$M\_$T\_$P\/ctrl_conv_output.sv\" \"../rtl_files_$N\_$M\_$T\_$P\/mac.sv\"];";
+set SRC_FILE [list \"../rtl_files_$N\_$M\_$T\_$P\/conv_$N\_$M\_$T\_$P.sv\" \"../rtl_files_$N\_$M\_$T\_$P\/fmem_ROM.sv\" \"../rtl_files_$N\_$M\_$T\_$P\/memory.sv\" \"../rtl_files_$N\_$M\_$T\_$P\/ctrl_mem_write.sv\" \"../rtl_files_$N\_$M\_$T\_$P\/ctrl_conv_output.sv\" \"../rtl_files_$N\_$M\_$T\_$P\/mac.sv\" \"../rtl_files_$N\_$M\_$T\_$P\/y_buffer.sv\"];";
 
 close $fh;
